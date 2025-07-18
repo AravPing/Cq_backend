@@ -32,7 +32,7 @@ def run_command(command, timeout=300):
             capture_output=True,
             text=True,
             timeout=timeout,
-            cwd="/app/backend"
+            cwd="/app"
         )
         
         if result.returncode == 0:
@@ -216,7 +216,7 @@ if __name__ == "__main__":
             text=True,
             timeout=60,
             env=env,
-            cwd="/app/backend"
+            cwd="/app"
         )
         
         logger.info(f"Test result stdout: {result.stdout}")
