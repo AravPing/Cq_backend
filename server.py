@@ -8,7 +8,7 @@ import requests
 import asyncio
 import json
 from playwright.async_api import async_playwright
-# Removed playwright-stealth for Python 3.13 compatibility
+from playwright_stealth import stealth_async
 from reportlab.lib.pagesizes import letter, A4
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, PageBreak, Table, TableStyle
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
@@ -44,7 +44,7 @@ setup_progress = {}
 # Dynamic Playwright browsers path - will be set during setup
 def get_playwright_browsers_path():
     """Get the current Playwright browsers path"""
-    return setup_state.get("browser_path") or os.getenv('PLAYWRIGHT_BROWSERS_PATH', '/pw-browsers')
+    return setup_state.get("browser_path") or os.getenv('PLAYWRIGHT_BROWSERS_PATH', '/tmp/pw-browsers')
 
 # Set initial Playwright browsers path
 os.environ['PLAYWRIGHT_BROWSERS_PATH'] = get_playwright_browsers_path()
@@ -241,7 +241,7 @@ def find_browser_path(installation_output: str) -> str:
     """Extract browser path from installation output"""
     try:
         # Dynamic browser path detection - look for actual installed browsers
-        browser_base_path = "/pw-browsers"
+        browser_base_path = "/tmp/pw-browsers"
         
         if not os.path.exists(browser_base_path):
             print(f"Browser base path {browser_base_path} does not exist, creating...")
@@ -266,19 +266,19 @@ def find_browser_path(installation_output: str) -> str:
         for line in lines:
             if 'chromium' in line.lower() and ('installed' in line.lower() or 'downloaded' in line.lower()):
                 # Try to extract path from line
-                if '/pw-browsers' in line:
+                if '/tmp/pw-browsers' in line:
                     # Extract the path
                     import re
-                    match = re.search(r'/pw-browsers[^\s]*', line)
+                    match = re.search(r'/tmp/pw-browsers[^\s]*', line)
                     if match:
                         return browser_base_path
         
         # Fallback: check if standard paths exist
         possible_paths = [
-            '/pw-browsers',
+            '/tmp/pw-browsers',
             '/root/.cache/ms-playwright',
             '/app/backend/pw-browsers',
-            '/tmp/pw-browsers'
+            '/pw-browsers'
         ]
         
         for path in possible_paths:
@@ -290,7 +290,7 @@ def find_browser_path(installation_output: str) -> str:
         
     except Exception as e:
         print(f"Error finding browser path: {e}")
-        return '/pw-browsers'
+        return '/tmp/pw-browsers'
 
 def install_playwright_dependencies(setup_id: str):
     """Install Playwright and its dependencies"""
@@ -313,7 +313,7 @@ def install_playwright_dependencies(setup_id: str):
                 print(f"Warning: Failed to install {dep_command}, continuing...")
         
         # Step 2: Ensure proper browser path
-        browser_path = "/pw-browsers"
+        browser_path = "/tmp/pw-browsers"
         os.makedirs(browser_path, exist_ok=True)
         os.environ['PLAYWRIGHT_BROWSERS_PATH'] = browser_path
         
@@ -764,8 +764,11 @@ async def scrape_mcq_content(url: str, search_topic: str) -> Optional[MCQData]:
     """
     try:
         async with async_playwright() as p:
-            # Use dynamic browser path
+            # Set browser path environment variable
             browser_path = get_playwright_browsers_path()
+            os.environ['PLAYWRIGHT_BROWSERS_PATH'] = browser_path
+            print(f"🔧 Setting PLAYWRIGHT_BROWSERS_PATH to: {browser_path}")
+            
             browser = await p.chromium.launch(
                 headless=True,
                 executable_path=None  # Let Playwright find the browser using PLAYWRIGHT_BROWSERS_PATH
@@ -775,8 +778,8 @@ async def scrape_mcq_content(url: str, search_topic: str) -> Optional[MCQData]:
             )
             page = await context.new_page()
             
-            # Apply stealth - Removed for Python 3.13 compatibility
-            # await stealth_async(page)
+            # Apply stealth
+            await stealth_async(page)
             
             # Navigate to page
             await page.goto(url, wait_until='domcontentloaded', timeout=30000)
@@ -1424,9 +1427,17 @@ async def process_screenshot_extraction(job_id: str, topic: str, exam_type: str,
     relevant_screenshots = 0
     irrelevant_screenshots = 0
     
-    # Initialize Playwright for screenshot capture
+    # Initialize Playwright for screenshot capture with proper browser path
     async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=True)
+        # Set browser path environment variable
+        browser_path = get_playwright_browsers_path()
+        os.environ['PLAYWRIGHT_BROWSERS_PATH'] = browser_path
+        print(f"🔧 Setting PLAYWRIGHT_BROWSERS_PATH to: {browser_path}")
+        
+        browser = await p.chromium.launch(
+            headless=True,
+            executable_path=None  # Let Playwright find the browser using PLAYWRIGHT_BROWSERS_PATH
+        )
         page = await browser.new_page()
         
         for i, link in enumerate(links, 1):
