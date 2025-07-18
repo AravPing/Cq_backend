@@ -31,8 +31,7 @@ def run_command(command, timeout=300):
             shell=True,
             capture_output=True,
             text=True,
-            timeout=timeout,
-            cwd="/app"
+            timeout=timeout
         )
         
         if result.returncode == 0:
@@ -211,12 +210,11 @@ if __name__ == "__main__":
     
     try:
         result = subprocess.run(
-            ["/root/.venv/bin/python", test_file],
+            [sys.executable, test_file],
             capture_output=True,
             text=True,
             timeout=60,
-            env=env,
-            cwd="/app"
+            env=env
         )
         
         logger.info(f"Test result stdout: {result.stdout}")
