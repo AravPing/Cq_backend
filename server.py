@@ -10,6 +10,8 @@ import json
 from playwright.async_api import async_playwright
 import subprocess
 import sys
+import time
+import threading
 
 from reportlab.lib.pagesizes import letter, A4
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, PageBreak, Table, TableStyle
@@ -36,115 +38,206 @@ os.environ['PLAYWRIGHT_BROWSERS_PATH'] = '/tmp/pw-browsers'
 browser_installation_state = {
     "is_installed": False,
     "installation_attempted": False,
-    "installation_error": None
+    "installation_error": None,
+    "installation_in_progress": False
 }
 
-def check_browser_installation():
-    """Check if Playwright browsers are installed"""
+def force_install_browsers():
+    """Force install browsers with comprehensive approach"""
+    print("🔄 Starting comprehensive browser installation...")
+    
     try:
-        browser_path = "/tmp/pw-browsers"
-        
-        if not os.path.exists(browser_path):
-            return False
-        
-        # Look for any chromium installation
-        for item in os.listdir(browser_path):
-            item_path = os.path.join(browser_path, item)
-            if os.path.isdir(item_path) and ("chromium" in item.lower() or "chrome" in item.lower()):
-                # Check if the actual executable exists
-                possible_executables = [
-                    os.path.join(item_path, "chrome-linux", "chrome"),
-                    os.path.join(item_path, "chrome-linux", "headless_shell"),
-                    os.path.join(item_path, "chromium"),
-                    os.path.join(item_path, "chrome")
-                ]
-                
-                for executable in possible_executables:
-                    if os.path.exists(executable):
-                        print(f"✅ Found Playwright browser at: {executable}")
-                        return True
-        
-        return False
-        
-    except Exception as e:
-        print(f"❌ Error checking browser installation: {e}")
-        return False
-
-def install_playwright_browsers():
-    """Install Playwright browsers if not already installed"""
-    try:
-        print("🔄 Installing Playwright browsers...")
-        
-        # Ensure the browser directory exists
+        # Ensure directory exists
         os.makedirs("/tmp/pw-browsers", exist_ok=True)
         
-        # Try different installation commands
+        # Set environment variables for installation
+        env = os.environ.copy()
+        env['PLAYWRIGHT_BROWSERS_PATH'] = '/tmp/pw-browsers'
+        env['PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD'] = '0'
+        
+        # Install system dependencies first
+        print("📦 Installing system dependencies...")
+        system_deps = [
+            "apt-get update -y",
+            "apt-get install -y curl wget gnupg lsb-release",
+            "apt-get install -y libnss3 libnspr4 libdbus-1-3 libatk1.0-0 libatk-bridge2.0-0 libcups2 libdrm2 libgtk-3-0 libgbm1 libasound2",
+            "apt-get install -y libxss1 libgconf-2-4 libxtst6 libxrandr2 libasound2 libpangocairo-1.0-0 libatk1.0-0 libcairo-gobject2 libgtk-3-0 libgdk-pixbuf2.0-0",
+            "apt-get install -y fonts-liberation libappindicator3-1 libasound2 libatk-bridge2.0-0 libatspi2.0-0 libdrm2 libgtk-3-0 libnspr4 libnss3 libxcomposite1 libxdamage1 libxrandr2 libgbm1 libxss1 libgconf-2-4"
+        ]
+        
+        for dep_cmd in system_deps:
+            try:
+                subprocess.run(dep_cmd, shell=True, capture_output=True, text=True, timeout=120, env=env)
+                print(f"   ✅ {dep_cmd.split()[2] if len(dep_cmd.split()) > 2 else dep_cmd}")
+            except:
+                print(f"   ⚠️ Failed: {dep_cmd}")
+        
+        # Multiple installation approaches
         install_commands = [
+            # Method 1: Direct playwright install
+            "playwright install chromium --with-deps",
             "playwright install chromium",
+            
+            # Method 2: Python module
+            "python -m playwright install chromium --with-deps",
             "python -m playwright install chromium",
-            "python3 -m playwright install chromium"
+            "python3 -m playwright install chromium --with-deps",
+            "python3 -m playwright install chromium",
+            
+            # Method 3: Using pip
+            "pip install playwright && playwright install chromium",
+            "pip3 install playwright && playwright install chromium",
+            
+            # Method 4: NPX approach
+            "npx playwright install chromium --with-deps",
+            "npx playwright install chromium",
+            
+            # Method 5: Direct download approach
+            "wget -O /tmp/install_playwright.py https://playwright.dev/python/docs/ci#installation && python /tmp/install_playwright.py"
         ]
         
         for cmd in install_commands:
             try:
-                print(f"   Trying: {cmd}")
+                print(f"🔄 Trying: {cmd}")
                 result = subprocess.run(
-                    cmd.split(),
+                    cmd,
+                    shell=True,
                     capture_output=True,
                     text=True,
-                    timeout=300,
+                    timeout=600,  # 10 minutes timeout
+                    env=env,
                     cwd="/app"
                 )
                 
                 if result.returncode == 0:
-                    print(f"   ✅ Successfully installed with: {cmd}")
-                    return True
+                    print(f"✅ SUCCESS with: {cmd}")
+                    print(f"   Output: {result.stdout[:200]}...")
+                    
+                    # Verify installation
+                    if verify_browser_installation():
+                        print("✅ Browser installation verified!")
+                        return True
+                    else:
+                        print("⚠️ Installation completed but verification failed")
+                        continue
                 else:
-                    print(f"   ❌ Command failed: {result.stderr}")
+                    print(f"❌ FAILED: {cmd}")
+                    print(f"   Error: {result.stderr[:200]}...")
+                    
             except subprocess.TimeoutExpired:
-                print(f"   ❌ Command timed out: {cmd}")
+                print(f"⏱️ TIMEOUT: {cmd}")
             except Exception as e:
-                print(f"   ❌ Command error: {e}")
+                print(f"💥 ERROR: {cmd} - {str(e)}")
+        
+        print("❌ All installation methods failed")
+        return False
+        
+    except Exception as e:
+        print(f"💥 Critical error in browser installation: {e}")
+        return False
+
+def verify_browser_installation():
+    """Verify browser installation with multiple checks"""
+    try:
+        browser_path = "/tmp/pw-browsers"
+        
+        if not os.path.exists(browser_path):
+            print("❌ Browser directory doesn't exist")
+            return False
+        
+        # Check for browser directories
+        browser_found = False
+        executable_found = False
+        
+        for item in os.listdir(browser_path):
+            item_path = os.path.join(browser_path, item)
+            if os.path.isdir(item_path) and ("chromium" in item.lower() or "chrome" in item.lower()):
+                browser_found = True
+                print(f"✅ Found browser directory: {item}")
+                
+                # Check for executables
+                possible_executables = [
+                    os.path.join(item_path, "chrome-linux", "chrome"),
+                    os.path.join(item_path, "chrome-linux", "headless_shell"),
+                    os.path.join(item_path, "chromium-linux", "chrome"),
+                    os.path.join(item_path, "chromium-linux", "headless_shell"),
+                    os.path.join(item_path, "chromium"),
+                    os.path.join(item_path, "chrome"),
+                    os.path.join(item_path, "headless_shell")
+                ]
+                
+                for executable in possible_executables:
+                    if os.path.exists(executable):
+                        executable_found = True
+                        print(f"✅ Found executable: {executable}")
+                        # Check if it's executable
+                        if os.access(executable, os.X_OK):
+                            print(f"✅ Executable is runnable: {executable}")
+                            return True
+                        else:
+                            print(f"⚠️ Executable not runnable: {executable}")
+        
+        if browser_found and not executable_found:
+            print("⚠️ Browser directory found but no executables")
+        elif not browser_found:
+            print("❌ No browser directories found")
         
         return False
         
     except Exception as e:
-        print(f"❌ Error installing browsers: {e}")
+        print(f"❌ Error verifying browser installation: {e}")
         return False
 
-def ensure_browsers_installed():
-    """Ensure browsers are installed, install if necessary"""
+def install_browsers_blocking():
+    """Install browsers in blocking mode during startup"""
     global browser_installation_state
     
-    if browser_installation_state["is_installed"]:
-        return True
-    
-    if browser_installation_state["installation_attempted"]:
-        return browser_installation_state["is_installed"]
-    
-    browser_installation_state["installation_attempted"] = True
+    print("🚀 Starting browser installation check...")
     
     # Check if already installed
-    if check_browser_installation():
+    if verify_browser_installation():
         browser_installation_state["is_installed"] = True
+        print("✅ Browsers already installed and verified!")
         return True
     
-    # Try to install
-    print("🔄 Playwright browsers not found. Attempting installation...")
-    if install_playwright_browsers():
-        # Verify installation
-        if check_browser_installation():
-            browser_installation_state["is_installed"] = True
-            print("✅ Playwright browsers installed successfully")
-            return True
-        else:
-            browser_installation_state["installation_error"] = "Browser installation completed but verification failed"
-            print("❌ Browser installation verification failed")
-            return False
+    # Mark installation as in progress
+    browser_installation_state["installation_in_progress"] = True
+    browser_installation_state["installation_attempted"] = True
+    
+    print("🔄 Browsers not found. Starting installation...")
+    
+    # Force install browsers
+    success = force_install_browsers()
+    
+    # Update state
+    browser_installation_state["installation_in_progress"] = False
+    browser_installation_state["is_installed"] = success
+    
+    if success:
+        print("🎉 Browser installation completed successfully!")
+        return True
     else:
-        browser_installation_state["installation_error"] = "Browser installation failed"
-        print("❌ Browser installation failed")
+        error_msg = "Failed to install Playwright browsers after trying all methods"
+        browser_installation_state["installation_error"] = error_msg
+        print(f"❌ {error_msg}")
         return False
+
+# Install browsers BEFORE creating the FastAPI app
+print("=" * 60)
+print("MCQ SCRAPER - BROWSER INSTALLATION")
+print("=" * 60)
+
+# CRITICAL: Install browsers before app starts
+install_success = install_browsers_blocking()
+
+if not install_success:
+    print("🚨 CRITICAL: Browser installation failed!")
+    print("🚨 App may not work properly for scraping tasks")
+    print("🚨 Manual installation may be required")
+else:
+    print("✅ Browser installation successful - App ready to serve!")
+
+print("=" * 60)
 
 app = FastAPI()
 
@@ -618,9 +711,12 @@ async def scrape_mcq_content(url: str, search_topic: str) -> Optional[MCQData]:
     CRITICAL: Only scrape MCQs where questionBody contains the search topic.
     """
     try:
-        # Ensure browsers are available before scraping
-        if not ensure_browsers_installed():
-            raise Exception("Playwright browsers not available. Please install them with: playwright install chromium")
+        # Check if browsers are available
+        if not browser_installation_state["is_installed"]:
+            if browser_installation_state["installation_error"]:
+                raise Exception(f"Playwright browsers not available: {browser_installation_state['installation_error']}")
+            else:
+                raise Exception("Playwright browsers not available. Please install them with: playwright install chromium")
         
         async with async_playwright() as p:
             browser = await p.chromium.launch(headless=True)
@@ -1275,9 +1371,12 @@ async def process_screenshot_extraction(job_id: str, topic: str, exam_type: str,
     relevant_screenshots = 0
     irrelevant_screenshots = 0
     
-    # Ensure browsers are available before taking screenshots
-    if not ensure_browsers_installed():
-        update_job_progress(job_id, "error", "❌ Playwright browsers not available. Please install them with: playwright install chromium")
+    # Check if browsers are available
+    if not browser_installation_state["is_installed"]:
+        if browser_installation_state["installation_error"]:
+            update_job_progress(job_id, "error", f"❌ Playwright browsers not available: {browser_installation_state['installation_error']}")
+        else:
+            update_job_progress(job_id, "error", "❌ Playwright browsers not available. Please install them with: playwright install chromium")
         return
     
     # Initialize Playwright for screenshot capture
@@ -1417,21 +1516,9 @@ async def health_check():
         "timestamp": datetime.now().isoformat(),
         "service": "MCQ Scraper API",
         "browsers_installed": browser_installation_state["is_installed"],
-        "browsers_error": browser_installation_state["installation_error"]
+        "browsers_error": browser_installation_state["installation_error"],
+        "installation_attempted": browser_installation_state["installation_attempted"]
     }
-
-# Initialize browser check on startup
-@app.on_event("startup")
-async def startup_event():
-    """Check browser installation on startup"""
-    print("🚀 MCQ Scraper API starting up...")
-    
-    # Check if browsers are installed
-    if check_browser_installation():
-        browser_installation_state["is_installed"] = True
-        print("✅ Playwright browsers are ready")
-    else:
-        print("⚠️ Playwright browsers not found - will attempt installation when needed")
 
 if __name__ == "__main__":
     import uvicorn
