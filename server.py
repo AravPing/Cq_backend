@@ -649,11 +649,9 @@ async def scrape_testbook_page_with_screenshot(page, url: str, topic: str) -> Op
 def is_mcq_relevant(question_text: str, search_topic: str) -> bool:
     """
     Check if MCQ is relevant by verifying if the search topic is present in the question body.
-    IMPORTANT: Only check questionBody, NOT options or solution.
-    Uses intelligent matching including word stems and related terms.
+    Uses intelligent matching including word stems, related terms, and contextual analysis.
     """
     if not question_text or not search_topic:
-        print(f"🔍 DEBUG: Empty question_text ({len(question_text) if question_text else 0}) or search_topic ({len(search_topic) if search_topic else 0})")
         return False
     
     # Convert to lowercase for case-insensitive matching
@@ -665,47 +663,88 @@ def is_mcq_relevant(question_text: str, search_topic: str) -> bool:
     
     # Add common word variations and stems
     topic_stems = {
-        'biology': ['biological', 'bio', 'organism', 'living', 'life'],
-        'physics': ['physical', 'force', 'energy', 'motion', 'matter'],
-        'chemistry': ['chemical', 'reaction', 'compound', 'element', 'molecule'],
-        'heart': ['cardiac', 'cardiovascular', 'circulation', 'blood', 'pulse'],
-        'mathematics': ['mathematical', 'math', 'equation', 'number', 'calculation'],
-        'history': ['historical', 'past', 'ancient', 'period', 'era'],
-        'geography': ['geographical', 'location', 'place', 'region', 'area'],
-        'economics': ['economic', 'economy', 'market', 'trade', 'finance'],
-        'politics': ['political', 'government', 'policy', 'administration', 'governance']
+        'biology': ['biological', 'bio', 'organism', 'living', 'life', 'cell', 'plant', 'animal', 'species', 'photosynthesis', 'respiration', 'DNA', 'gene'],
+        'physics': ['physical', 'force', 'energy', 'motion', 'matter', 'quantum', 'wave', 'particle', 'newton', 'gravity', 'electricity', 'magnetism'],
+        'chemistry': ['chemical', 'reaction', 'compound', 'element', 'molecule', 'atom', 'bond', 'formula', 'water', 'oxygen', 'carbon', 'acid'],
+        'heart': ['cardiac', 'cardiovascular', 'circulation', 'blood', 'pulse', 'artery', 'vein', 'pressure', 'organ', 'pump'],
+        'mathematics': ['mathematical', 'math', 'equation', 'number', 'calculation', 'formula', 'solve', 'calculate', 'area', 'radius', 'circle', 'triangle'],
+        'history': ['historical', 'past', 'ancient', 'period', 'era', 'dynasty', 'empire', 'civilization', 'war', 'battle', 'year', 'century'],
+        'geography': ['geographical', 'location', 'place', 'region', 'area', 'continent', 'country', 'climate', 'capital', 'city', 'ocean', 'river', 'mountain'],
+        'economics': ['economic', 'economy', 'market', 'trade', 'finance', 'gdp', 'inflation', 'banking', 'money', 'currency', 'investment'],
+        'politics': ['political', 'government', 'policy', 'administration', 'governance', 'democracy', 'election', 'president', 'minister', 'parliament'],
+        'computer': ['computing', 'software', 'hardware', 'algorithm', 'programming', 'digital', 'binary', 'data', 'internet', 'technology'],
+        'science': ['scientific', 'research', 'theory', 'experiment', 'hypothesis', 'discovery', 'planet', 'solar', 'universe', 'nature'],
+        'english': ['grammar', 'vocabulary', 'literature', 'language', 'sentence', 'word', 'comprehension', 'reading', 'writing'],
+        'reasoning': ['logical', 'logic', 'puzzle', 'pattern', 'sequence', 'analogy', 'verbal', 'analytical', 'solve', 'problem']
     }
     
     # Add stems for the search topic
     if topic_lower in topic_stems:
         topic_variations.extend(topic_stems[topic_lower])
     
+    # Add individual words from multi-word topics
+    topic_words = topic_lower.split()
+    for word in topic_words:
+        if len(word) > 3:  # Only add meaningful words
+            topic_variations.append(word)
+    
     # Also add partial matches (word stems)
     if len(topic_lower) > 4:
         # Add root word (remove common suffixes)
         root_word = topic_lower
-        suffixes = ['ical', 'ing', 'ed', 'er', 'est', 'ly', 'tion', 'sion', 'ness', 'ment']
+        suffixes = ['ical', 'ing', 'ed', 'er', 'est', 'ly', 'tion', 'sion', 'ness', 'ment', 'ogy', 'ics']
         for suffix in suffixes:
             if root_word.endswith(suffix) and len(root_word) > len(suffix) + 2:
                 root_word = root_word[:-len(suffix)]
                 topic_variations.append(root_word)
                 break
     
+    # Remove duplicates and sort by length (longer terms first for better matching)
+    topic_variations = sorted(list(set(topic_variations)), key=len, reverse=True)
+    
     # Check if any variation is present in question body
     is_relevant = False
     matched_term = ""
     
     for variation in topic_variations:
-        if variation in question_lower:
+        if len(variation) > 2 and variation in question_lower:
             is_relevant = True
             matched_term = variation
             break
     
-    # Enhanced debug logging
-    print(f"🔍 DEBUG: Question (first 100 chars): '{question_lower[:100]}...'")
-    print(f"🔍 DEBUG: Topic to find: '{topic_lower}'")
-    print(f"🔍 DEBUG: Topic variations: {topic_variations}")
-    print(f"🔍 DEBUG: Matched term: '{matched_term}' - Topic found in question: {is_relevant}")
+    # If no direct match found, try broader contextual matching
+    if not is_relevant:
+        # Check if question contains educational/academic keywords
+        educational_keywords = ['what', 'which', 'when', 'where', 'how', 'why', 'identify', 'calculate', 'find', 'determine', 'solve', 'name']
+        has_educational_structure = any(keyword in question_lower for keyword in educational_keywords)
+        
+        if has_educational_structure:
+            # Check for contextual relevance based on question content
+            question_words = set(question_lower.split())
+            
+            # Context-based matching for different subjects
+            subject_contexts = {
+                'geography': ['capital', 'country', 'city', 'ocean', 'river', 'mountain', 'continent', 'largest', 'smallest', 'located', 'where'],
+                'mathematics': ['calculate', 'area', 'radius', 'circle', 'triangle', 'number', 'equation', 'formula', 'solve', 'add', 'subtract'],
+                'biology': ['living', 'organism', 'plant', 'animal', 'cell', 'life', 'species', 'photosynthesis', 'respiration', 'organ'],
+                'chemistry': ['formula', 'compound', 'element', 'molecule', 'atom', 'reaction', 'chemical', 'acid', 'base', 'water'],
+                'physics': ['force', 'energy', 'motion', 'matter', 'gravity', 'electricity', 'magnetism', 'wave', 'particle'],
+                'history': ['war', 'battle', 'year', 'century', 'ancient', 'period', 'empire', 'dynasty', 'when', 'ended', 'started'],
+                'politics': ['government', 'democracy', 'election', 'president', 'minister', 'parliament', 'governance', 'policy'],
+                'science': ['planet', 'solar', 'universe', 'theory', 'experiment', 'discovery', 'research', 'scientific'],
+                'heart': ['organ', 'blood', 'pump', 'body', 'circulation', 'cardiac', 'artery', 'vein'],
+                'computer': ['software', 'hardware', 'algorithm', 'programming', 'digital', 'data', 'internet', 'technology'],
+                'english': ['grammar', 'vocabulary', 'language', 'sentence', 'word', 'reading', 'writing', 'literature'],
+                'reasoning': ['logic', 'puzzle', 'pattern', 'sequence', 'analogy', 'solve', 'problem', 'logical']
+            }
+            
+            # Check if question words overlap with subject context
+            if topic_lower in subject_contexts:
+                context_words = set(subject_contexts[topic_lower])
+                overlap = question_words.intersection(context_words)
+                if overlap:
+                    is_relevant = True
+                    matched_term = f"contextual: {', '.join(overlap)}"
     
     return is_relevant
 
@@ -801,6 +840,7 @@ async def scrape_mcq_content(url: str, search_topic: str) -> Optional[MCQData]:
     """
     Scrape MCQ content with topic relevance filtering and exam source extraction.
     CRITICAL: Only scrape MCQs where questionBody contains the search topic.
+    Optimized for speed with faster page loading and element selection.
     """
     try:
         # Check if browsers are available
@@ -834,25 +874,32 @@ async def scrape_mcq_content(url: str, search_topic: str) -> Optional[MCQData]:
             )
             page = await context.new_page()
             
-            # Navigate to page
-            await page.goto(url, wait_until='domcontentloaded', timeout=30000)
+            # Navigate to page with faster loading strategy
+            await page.goto(url, wait_until='domcontentloaded', timeout=20000)
             
-            # Wait for content to load
-            await page.wait_for_timeout(2000)
+            # Reduced wait time for faster processing
+            await page.wait_for_timeout(1000)
             
-            # Extract question using correct selectors
+            # Extract question using correct selectors with faster approach
             question = ""
             
-            # Try h1.questionBody.tag-h1 first
-            question_element = await page.query_selector('h1.questionBody.tag-h1')
+            # Try both selectors concurrently
+            question_selectors = ['h1.questionBody.tag-h1', 'div.questionBody']
+            question_elements = await asyncio.gather(
+                *[page.query_selector(selector) for selector in question_selectors],
+                return_exceptions=True
+            )
+            
+            # Use the first successful result
+            question_element = None
+            for element in question_elements:
+                if element and not isinstance(element, Exception):
+                    question_element = element
+                    break
+            
             if question_element:
                 question = await question_element.inner_text()
-            else:
-                # Fallback to .questionBody as div
-                question_element = await page.query_selector('div.questionBody')
-                if question_element:
-                    question = await question_element.inner_text()
-            
+                
             # Clean question text
             if question:
                 question = clean_unwanted_text(question)
@@ -869,41 +916,43 @@ async def scrape_mcq_content(url: str, search_topic: str) -> Optional[MCQData]:
             
             print(f"✅ MCQ relevant - topic '{search_topic}' found in question body")
             
-            # Extract options using correct selector
-            options = []
-            option_elements = await page.query_selector_all('li.option')
-            for option_elem in option_elements:
-                option_text = await option_elem.inner_text()
-                if option_text.strip():
-                    options.append(clean_unwanted_text(option_text.strip()))
+            # Extract options, answer, and exam source concurrently for speed
+            option_elements_task = page.query_selector_all('li.option')
+            answer_element_task = page.query_selector('.solution')
+            exam_heading_element_task = page.query_selector('div.pyp-heading')
+            exam_title_element_task = page.query_selector('div.pyp-title.line-ellipsis')
             
-            # Extract answer and solution
+            # Wait for all tasks to complete
+            option_elements, answer_element, exam_heading_element, exam_title_element = await asyncio.gather(
+                option_elements_task, answer_element_task, exam_heading_element_task, exam_title_element_task
+            )
+            
+            # Process options
+            options = []
+            if option_elements:
+                option_tasks = [option_elem.inner_text() for option_elem in option_elements]
+                option_texts = await asyncio.gather(*option_tasks)
+                options = [clean_unwanted_text(text.strip()) for text in option_texts if text.strip()]
+            
+            # Process answer
             answer = ""
-            answer_element = await page.query_selector('.solution')
             if answer_element:
                 answer = await answer_element.inner_text()
+                answer = clean_unwanted_text(answer)
             
-            # NEW: Extract exam source information
+            # Process exam source information
             exam_source_heading = ""
             exam_source_title = ""
             
-            # Extract exam source heading
-            exam_heading_element = await page.query_selector('div.pyp-heading')
             if exam_heading_element:
                 exam_source_heading = await exam_heading_element.inner_text()
                 exam_source_heading = clean_unwanted_text(exam_source_heading)
             
-            # Extract exam source title
-            exam_title_element = await page.query_selector('div.pyp-title.line-ellipsis')
             if exam_title_element:
                 exam_source_title = await exam_title_element.inner_text()
                 exam_source_title = clean_unwanted_text(exam_source_title)
             
             await browser.close()
-            
-            # Clean unwanted text from answer
-            if answer:
-                answer = clean_unwanted_text(answer)
             
             # Return enhanced MCQ data if we found content
             if question and (options or answer):
@@ -1410,37 +1459,59 @@ async def process_mcq_extraction(job_id: str, topic: str, exam_type: str = "SSC"
         print(f"❌ Error in process_mcq_extraction: {e}")
 
 async def process_text_extraction(job_id: str, topic: str, exam_type: str, links: List[str]):
-    """Process text-based MCQ extraction"""
+    """Process text-based MCQ extraction with optimized concurrent processing"""
     # Extract MCQs with filtering
     mcqs = []
     relevant_mcqs = 0
     irrelevant_mcqs = 0
     
-    for i, link in enumerate(links, 1):
-        current_progress = f"🔍 Processing link {i} of {len(links)} - Smart filtering enabled..."
+    # Process in batches for better performance
+    batch_size = 5  # Process 5 URLs concurrently
+    total_batches = (len(links) + batch_size - 1) // batch_size
+    
+    print(f"🚀 Starting optimized processing: {len(links)} links in {total_batches} batches of {batch_size}")
+    
+    for batch_num in range(total_batches):
+        batch_start = batch_num * batch_size
+        batch_end = min(batch_start + batch_size, len(links))
+        batch_links = links[batch_start:batch_end]
+        
+        print(f"📦 Processing batch {batch_num + 1}/{total_batches}: links {batch_start + 1}-{batch_end}")
+        
+        current_progress = f"🔍 Processing batch {batch_num + 1}/{total_batches} - Smart filtering enabled..."
         update_job_progress(job_id, "running", current_progress, 
-                          processed_links=i-1, mcqs_found=len(mcqs))
+                          processed_links=batch_start, mcqs_found=len(mcqs))
         
-        # Pass search topic to scraping function for filtering
-        mcq_data = await scrape_mcq_content(link, topic)
-        if mcq_data:
-            mcqs.append(mcq_data)
-            relevant_mcqs += 1
-            update_job_progress(job_id, "running", 
-                              f"✅ Found relevant MCQ {i}/{len(links)} - Topic: '{topic}' found in question! Total: {len(mcqs)}", 
-                              processed_links=i, mcqs_found=len(mcqs))
-        else:
-            irrelevant_mcqs += 1
-            update_job_progress(job_id, "running", 
-                              f"⚠️ Skipped irrelevant MCQ {i}/{len(links)} - Topic: '{topic}' not in question. Total: {len(mcqs)}", 
-                              processed_links=i, mcqs_found=len(mcqs))
+        # Process batch concurrently
+        tasks = [scrape_mcq_content(link, topic) for link in batch_links]
+        batch_results = await asyncio.gather(*tasks, return_exceptions=True)
         
-        # Small delay between scrapes to be respectful
-        await asyncio.sleep(1)
+        # Process results
+        for i, result in enumerate(batch_results):
+            link_index = batch_start + i + 1
+            if isinstance(result, Exception):
+                print(f"❌ Error processing link {link_index}: {result}")
+                irrelevant_mcqs += 1
+            elif result:
+                mcqs.append(result)
+                relevant_mcqs += 1
+                print(f"✅ Found relevant MCQ {link_index}/{len(links)} - Topic: '{topic}' found in question! Total: {len(mcqs)}")
+            else:
+                irrelevant_mcqs += 1
+                print(f"⚠️ Skipped irrelevant MCQ {link_index}/{len(links)} - Topic: '{topic}' not in question. Total: {len(mcqs)}")
+        
+        # Update progress after each batch
+        update_job_progress(job_id, "running", 
+                          f"✅ Batch {batch_num + 1}/{total_batches} complete - Found {len(mcqs)} relevant MCQs so far", 
+                          processed_links=batch_end, mcqs_found=len(mcqs))
+        
+        # Small delay between batches to be respectful to the server
+        if batch_num < total_batches - 1:  # Don't delay after last batch
+            await asyncio.sleep(2)
     
     if not mcqs:
         update_job_progress(job_id, "completed", 
-                          f"❌ No relevant MCQs found for '{topic}' across {len(links)} links. Please try another topic.", 
+                          f"❌ No relevant MCQs found for '{topic}' across {len(links)} links. Please try another topic or check your search terms.", 
                           total_links=len(links), processed_links=len(links), mcqs_found=0)
         return
     
@@ -1464,7 +1535,7 @@ async def process_text_extraction(job_id: str, topic: str, exam_type: str, links
         "relevant_mcqs": relevant_mcqs,
         "irrelevant_mcqs": irrelevant_mcqs,
         "filtering_efficiency": round((relevant_mcqs / len(links)) * 100, 1),
-        "topic_match_success": round((relevant_mcqs / (relevant_mcqs + irrelevant_mcqs)) * 100, 1),
+        "topic_match_success": round((relevant_mcqs / (relevant_mcqs + irrelevant_mcqs)) * 100, 1) if (relevant_mcqs + irrelevant_mcqs) > 0 else 0,
         "generated_at": datetime.now().isoformat(),
         "api_keys_used": api_key_manager.get_remaining_keys(),
         "exam_focus": exam_type
@@ -1475,7 +1546,7 @@ async def process_text_extraction(job_id: str, topic: str, exam_type: str, links
                       mcqs_found=len(mcqs), pdf_url=pdf_url)
 
 async def process_screenshot_extraction(job_id: str, topic: str, exam_type: str, links: List[str]):
-    """Process screenshot-based MCQ extraction for image PDFs"""
+    """Process screenshot-based MCQ extraction for image PDFs with optimized concurrent processing"""
     screenshots_data = []
     relevant_screenshots = 0
     irrelevant_screenshots = 0
@@ -1488,39 +1559,70 @@ async def process_screenshot_extraction(job_id: str, topic: str, exam_type: str,
             update_job_progress(job_id, "error", "❌ Playwright browsers not available. Please install them with: playwright install chromium")
         return
     
-    # Initialize Playwright for screenshot capture
+    # Process in batches for better performance
+    batch_size = 3  # Process 3 URLs concurrently for screenshots (more memory intensive)
+    total_batches = (len(links) + batch_size - 1) // batch_size
+    
+    print(f"🚀 Starting optimized screenshot processing: {len(links)} links in {total_batches} batches of {batch_size}")
+    
+    # Initialize Playwright with multiple browser contexts for concurrent processing
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=True)
-        page = await browser.new_page()
         
-        for i, link in enumerate(links, 1):
-            current_progress = f"📸 Capturing screenshot {i} of {len(links)} - Smart filtering enabled..."
+        for batch_num in range(total_batches):
+            batch_start = batch_num * batch_size
+            batch_end = min(batch_start + batch_size, len(links))
+            batch_links = links[batch_start:batch_end]
+            
+            print(f"📦 Processing screenshot batch {batch_num + 1}/{total_batches}: links {batch_start + 1}-{batch_end}")
+            
+            current_progress = f"📸 Processing screenshot batch {batch_num + 1}/{total_batches} - Smart filtering enabled..."
             update_job_progress(job_id, "running", current_progress, 
-                              processed_links=i-1, mcqs_found=len(screenshots_data))
+                              processed_links=batch_start, mcqs_found=len(screenshots_data))
             
-            # Capture screenshot with filtering
-            screenshot_data = await scrape_testbook_page_with_screenshot(page, link, topic)
+            # Create multiple pages for concurrent processing
+            pages = []
+            for _ in range(len(batch_links)):
+                page = await browser.new_page()
+                pages.append(page)
             
-            if screenshot_data and screenshot_data['is_relevant']:
-                screenshots_data.append(screenshot_data)
-                relevant_screenshots += 1
-                update_job_progress(job_id, "running", 
-                                  f"✅ Captured relevant screenshot {i}/{len(links)} - Topic: '{topic}' found in question! Total: {len(screenshots_data)}", 
-                                  processed_links=i, mcqs_found=len(screenshots_data))
-            else:
-                irrelevant_screenshots += 1
-                update_job_progress(job_id, "running", 
-                                  f"⚠️ Skipped irrelevant screenshot {i}/{len(links)} - Topic: '{topic}' not in question. Total: {len(screenshots_data)}", 
-                                  processed_links=i, mcqs_found=len(screenshots_data))
+            # Process batch concurrently
+            tasks = [scrape_testbook_page_with_screenshot(pages[i], batch_links[i], topic) 
+                    for i in range(len(batch_links))]
+            batch_results = await asyncio.gather(*tasks, return_exceptions=True)
             
-            # Small delay between scrapes to be respectful
-            await asyncio.sleep(1)
+            # Close pages after processing
+            for page in pages:
+                await page.close()
+            
+            # Process results
+            for i, result in enumerate(batch_results):
+                link_index = batch_start + i + 1
+                if isinstance(result, Exception):
+                    print(f"❌ Error processing screenshot {link_index}: {result}")
+                    irrelevant_screenshots += 1
+                elif result and result.get('is_relevant'):
+                    screenshots_data.append(result)
+                    relevant_screenshots += 1
+                    print(f"✅ Captured relevant screenshot {link_index}/{len(links)} - Topic: '{topic}' found in question! Total: {len(screenshots_data)}")
+                else:
+                    irrelevant_screenshots += 1
+                    print(f"⚠️ Skipped irrelevant screenshot {link_index}/{len(links)} - Topic: '{topic}' not in question. Total: {len(screenshots_data)}")
+            
+            # Update progress after each batch
+            update_job_progress(job_id, "running", 
+                              f"✅ Screenshot batch {batch_num + 1}/{total_batches} complete - Found {len(screenshots_data)} relevant screenshots so far", 
+                              processed_links=batch_end, mcqs_found=len(screenshots_data))
+            
+            # Small delay between batches to be respectful to the server
+            if batch_num < total_batches - 1:  # Don't delay after last batch
+                await asyncio.sleep(2)
         
         await browser.close()
     
     if not screenshots_data:
         update_job_progress(job_id, "completed", 
-                          f"❌ No relevant screenshots found for '{topic}' across {len(links)} links. Please try another topic.", 
+                          f"❌ No relevant screenshots found for '{topic}' across {len(links)} links. Please try another topic or check your search terms.", 
                           total_links=len(links), processed_links=len(links), mcqs_found=0)
         return
     
@@ -1544,7 +1646,7 @@ async def process_screenshot_extraction(job_id: str, topic: str, exam_type: str,
         "relevant_mcqs": relevant_screenshots,
         "irrelevant_mcqs": irrelevant_screenshots,
         "filtering_efficiency": round((relevant_screenshots / len(links)) * 100, 1),
-        "topic_match_success": round((relevant_screenshots / (relevant_screenshots + irrelevant_screenshots)) * 100, 1),
+        "topic_match_success": round((relevant_screenshots / (relevant_screenshots + irrelevant_screenshots)) * 100, 1) if (relevant_screenshots + irrelevant_screenshots) > 0 else 0,
         "generated_at": datetime.now().isoformat(),
         "api_keys_used": api_key_manager.get_remaining_keys(),
         "exam_focus": exam_type,
@@ -1627,6 +1729,24 @@ async def health_check():
         "browsers_installed": browser_installation_state["is_installed"],
         "browsers_error": browser_installation_state["installation_error"],
         "installation_attempted": browser_installation_state["installation_attempted"]
+    }
+
+@app.post("/api/test-filter")
+async def test_filter_logic(request: dict):
+    """Test the smart filtering logic with sample data"""
+    question_text = request.get("question", "")
+    topic = request.get("topic", "")
+    
+    if not question_text or not topic:
+        raise HTTPException(status_code=400, detail="Both 'question' and 'topic' are required")
+    
+    is_relevant = is_mcq_relevant(question_text, topic)
+    
+    return {
+        "question": question_text,
+        "topic": topic,
+        "is_relevant": is_relevant,
+        "timestamp": datetime.now().isoformat()
     }
 
 if __name__ == "__main__":
