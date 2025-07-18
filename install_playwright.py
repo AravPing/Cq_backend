@@ -69,7 +69,7 @@ def check_browsers_installed():
     """Check if Playwright browsers are installed"""
     try:
         # Use dynamic approach to check for any installed browsers
-        browser_base_path = "/pw-browsers"
+        browser_base_path = "/tmp/pw-browsers"
         
         if not os.path.exists(browser_base_path):
             logger.warning(f"Browser base path {browser_base_path} does not exist")
@@ -107,7 +107,7 @@ def install_playwright_browsers():
     logger.info("Starting Playwright browser installation...")
     
     # Ensure we have the right environment
-    os.environ['PLAYWRIGHT_BROWSERS_PATH'] = "/pw-browsers"
+    os.environ['PLAYWRIGHT_BROWSERS_PATH'] = "/tmp/pw-browsers"
     
     # Install system dependencies first
     install_system_dependencies()
@@ -175,7 +175,7 @@ from playwright.async_api import async_playwright
 async def test_playwright():
     try:
         # Set the browser path environment variable
-        os.environ['PLAYWRIGHT_BROWSERS_PATH'] = '/pw-browsers'
+        os.environ['PLAYWRIGHT_BROWSERS_PATH'] = '/tmp/pw-browsers'
         
         async with async_playwright() as p:
             browser = await p.chromium.launch(
@@ -207,7 +207,7 @@ if __name__ == "__main__":
     
     # Run the test with proper environment
     env = os.environ.copy()
-    env['PLAYWRIGHT_BROWSERS_PATH'] = '/pw-browsers'
+    env['PLAYWRIGHT_BROWSERS_PATH'] = '/tmp/pw-browsers'
     
     try:
         result = subprocess.run(
