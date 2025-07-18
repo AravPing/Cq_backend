@@ -8,6 +8,8 @@ import requests
 import asyncio
 import json
 from playwright.async_api import async_playwright
+import subprocess
+import sys
 
 from reportlab.lib.pagesizes import letter, A4
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, PageBreak, Table, TableStyle
@@ -29,6 +31,120 @@ load_dotenv()
 
 # Set Playwright browsers path
 os.environ['PLAYWRIGHT_BROWSERS_PATH'] = '/tmp/pw-browsers'
+
+# Browser installation state
+browser_installation_state = {
+    "is_installed": False,
+    "installation_attempted": False,
+    "installation_error": None
+}
+
+def check_browser_installation():
+    """Check if Playwright browsers are installed"""
+    try:
+        browser_path = "/tmp/pw-browsers"
+        
+        if not os.path.exists(browser_path):
+            return False
+        
+        # Look for any chromium installation
+        for item in os.listdir(browser_path):
+            item_path = os.path.join(browser_path, item)
+            if os.path.isdir(item_path) and ("chromium" in item.lower() or "chrome" in item.lower()):
+                # Check if the actual executable exists
+                possible_executables = [
+                    os.path.join(item_path, "chrome-linux", "chrome"),
+                    os.path.join(item_path, "chrome-linux", "headless_shell"),
+                    os.path.join(item_path, "chromium"),
+                    os.path.join(item_path, "chrome")
+                ]
+                
+                for executable in possible_executables:
+                    if os.path.exists(executable):
+                        print(f"✅ Found Playwright browser at: {executable}")
+                        return True
+        
+        return False
+        
+    except Exception as e:
+        print(f"❌ Error checking browser installation: {e}")
+        return False
+
+def install_playwright_browsers():
+    """Install Playwright browsers if not already installed"""
+    try:
+        print("🔄 Installing Playwright browsers...")
+        
+        # Ensure the browser directory exists
+        os.makedirs("/tmp/pw-browsers", exist_ok=True)
+        
+        # Try different installation commands
+        install_commands = [
+            "playwright install chromium",
+            "python -m playwright install chromium",
+            "python3 -m playwright install chromium"
+        ]
+        
+        for cmd in install_commands:
+            try:
+                print(f"   Trying: {cmd}")
+                result = subprocess.run(
+                    cmd.split(),
+                    capture_output=True,
+                    text=True,
+                    timeout=300,
+                    cwd="/app"
+                )
+                
+                if result.returncode == 0:
+                    print(f"   ✅ Successfully installed with: {cmd}")
+                    return True
+                else:
+                    print(f"   ❌ Command failed: {result.stderr}")
+            except subprocess.TimeoutExpired:
+                print(f"   ❌ Command timed out: {cmd}")
+            except Exception as e:
+                print(f"   ❌ Command error: {e}")
+        
+        return False
+        
+    except Exception as e:
+        print(f"❌ Error installing browsers: {e}")
+        return False
+
+def ensure_browsers_installed():
+    """Ensure browsers are installed, install if necessary"""
+    global browser_installation_state
+    
+    if browser_installation_state["is_installed"]:
+        return True
+    
+    if browser_installation_state["installation_attempted"]:
+        return browser_installation_state["is_installed"]
+    
+    browser_installation_state["installation_attempted"] = True
+    
+    # Check if already installed
+    if check_browser_installation():
+        browser_installation_state["is_installed"] = True
+        return True
+    
+    # Try to install
+    print("🔄 Playwright browsers not found. Attempting installation...")
+    if install_playwright_browsers():
+        # Verify installation
+        if check_browser_installation():
+            browser_installation_state["is_installed"] = True
+            print("✅ Playwright browsers installed successfully")
+            return True
+        else:
+            browser_installation_state["installation_error"] = "Browser installation completed but verification failed"
+            print("❌ Browser installation verification failed")
+            return False
+    else:
+        browser_installation_state["installation_error"] = "Browser installation failed"
+        print("❌ Browser installation failed")
+        return False
 
 app = FastAPI()
 
@@ -502,6 +618,10 @@ async def scrape_mcq_content(url: str, search_topic: str) -> Optional[MCQData]:
     CRITICAL: Only scrape MCQs where questionBody contains the search topic.
     """
     try:
+        # Ensure browsers are available before scraping
+        if not ensure_browsers_installed():
+            raise Exception("Playwright browsers not available. Please install them with: playwright install chromium")
+        
         async with async_playwright() as p:
             browser = await p.chromium.launch(headless=True)
             context = await browser.new_context(
@@ -1155,6 +1275,11 @@ async def process_screenshot_extraction(job_id: str, topic: str, exam_type: str,
     relevant_screenshots = 0
     irrelevant_screenshots = 0
     
+    # Ensure browsers are available before taking screenshots
+    if not ensure_browsers_installed():
+        update_job_progress(job_id, "error", "❌ Playwright browsers not available. Please install them with: playwright install chromium")
+        return
+    
     # Initialize Playwright for screenshot capture
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=True)
@@ -1290,8 +1415,23 @@ async def health_check():
     return {
         "status": "healthy",
         "timestamp": datetime.now().isoformat(),
-        "service": "MCQ Scraper API"
+        "service": "MCQ Scraper API",
+        "browsers_installed": browser_installation_state["is_installed"],
+        "browsers_error": browser_installation_state["installation_error"]
     }
+
+# Initialize browser check on startup
+@app.on_event("startup")
+async def startup_event():
+    """Check browser installation on startup"""
+    print("🚀 MCQ Scraper API starting up...")
+    
+    # Check if browsers are installed
+    if check_browser_installation():
+        browser_installation_state["is_installed"] = True
+        print("✅ Playwright browsers are ready")
+    else:
+        print("⚠️ Playwright browsers not found - will attempt installation when needed")
 
 if __name__ == "__main__":
     import uvicorn
