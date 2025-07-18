@@ -42,23 +42,34 @@ browser_installation_state = {
     "installation_in_progress": False
 }
 
-# Browser Pool Manager - SOLUTION TO THE RESOURCE EXHAUSTION ISSUE
-class BrowserPoolManager:
-    """Manages a single browser instance with multiple contexts for efficient resource usage"""
+# ENHANCED Browser Pool Manager - ROBUST CLOUD DEPLOYMENT VERSION
+class RobustBrowserPoolManager:
+    """
+    Enhanced browser manager with robust error handling for cloud deployments
+    Handles browser crashes, resource constraints, and connection failures
+    """
     
     def __init__(self):
         self.browser: Optional[Browser] = None
         self.playwright_instance = None
         self.is_initialized = False
         self.lock = asyncio.Lock()
+        self.retry_count = 0
+        self.max_retries = 3
+        self.last_error = None
         
     async def initialize(self):
-        """Initialize the browser pool with a single browser instance"""
+        """Initialize browser with enhanced cloud-friendly settings"""
         async with self.lock:
+            if self.is_initialized and self.browser and not self.browser.is_connected():
+                print("⚠️ Browser disconnected, reinitializing...")
+                await self._cleanup()
+                self.is_initialized = False
+            
             if self.is_initialized:
                 return
             
-            print("🚀 Initializing Browser Pool Manager...")
+            print("🚀 Initializing Robust Browser Pool Manager...")
             
             # Check if browsers are installed
             if not browser_installation_state["is_installed"]:
@@ -67,34 +78,63 @@ class BrowserPoolManager:
             
             try:
                 self.playwright_instance = await async_playwright().start()
+                
+                # Enhanced browser launch args for cloud stability
+                browser_args = [
+                    '--no-sandbox',
+                    '--disable-setuid-sandbox',
+                    '--disable-dev-shm-usage',
+                    '--disable-accelerated-2d-canvas',
+                    '--disable-gpu',
+                    '--disable-gpu-sandbox',
+                    '--disable-software-rasterizer',
+                    '--no-first-run',
+                    '--no-zygote',
+                    '--single-process',
+                    '--disable-background-timer-throttling',
+                    '--disable-backgrounding-occluded-windows',
+                    '--disable-renderer-backgrounding',
+                    '--disable-web-security',
+                    '--disable-features=VizDisplayCompositor',
+                    '--disable-extensions',
+                    '--disable-plugins',
+                    '--disable-images',
+                    '--disable-javascript',  # We don't need JS for scraping
+                    '--disable-default-apps',
+                    '--disable-background-networking',
+                    '--disable-sync',
+                    '--no-default-browser-check',
+                    '--memory-pressure-off',
+                    '--max_old_space_size=512',
+                    '--aggressive-cache-discard',
+                    '--disable-hang-monitor',
+                    '--disable-prompt-on-repost',
+                    '--disable-client-side-phishing-detection',
+                    '--disable-component-extensions-with-background-pages'
+                ]
+                
                 self.browser = await self.playwright_instance.chromium.launch(
                     headless=True,
-                    args=[
-                        '--no-sandbox',
-                        '--disable-setuid-sandbox',
-                        '--disable-dev-shm-usage',
-                        '--disable-accelerated-2d-canvas',
-                        '--disable-gpu',
-                        '--no-first-run',
-                        '--no-zygote',
-                        '--single-process',
-                        '--disable-background-timer-throttling',
-                        '--disable-backgrounding-occluded-windows',
-                        '--disable-renderer-backgrounding'
-                    ]
+                    args=browser_args
                 )
+                
+                # Test browser connection
+                test_context = await self.browser.new_context()
+                await test_context.close()
+                
                 self.is_initialized = True
-                print("✅ Browser Pool Manager initialized successfully!")
+                self.retry_count = 0
+                print("✅ Robust Browser Pool Manager initialized successfully!")
                 
             except Exception as e:
-                print(f"❌ Failed to initialize Browser Pool Manager: {e}")
+                print(f"❌ Failed to initialize Robust Browser Pool Manager: {e}")
+                self.last_error = str(e)
                 await self._cleanup()
                 raise
     
     async def _install_browsers(self):
         """Install browsers if not available"""
         try:
-            # Try basic installation
             result = subprocess.run(
                 [sys.executable, "-m", "playwright", "install", "chromium"],
                 capture_output=True,
@@ -113,46 +153,92 @@ class BrowserPoolManager:
             raise
     
     async def get_context(self) -> BrowserContext:
-        """Get a new browser context for isolated scraping"""
-        if not self.is_initialized or not self.browser:
-            await self.initialize()
+        """Get a new browser context with robust error handling and retries"""
+        max_attempts = 3
         
-        try:
-            context = await self.browser.new_context(
-                user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-                viewport={'width': 1920, 'height': 1080}
-            )
-            return context
-        except Exception as e:
-            print(f"⚠️ Error creating context, reinitializing browser: {e}")
-            await self._cleanup()
-            await self.initialize()
-            return await self.browser.new_context(
-                user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-                viewport={'width': 1920, 'height': 1080}
-            )
+        for attempt in range(max_attempts):
+            try:
+                # Ensure browser is initialized and connected
+                if not self.is_initialized or not self.browser or not self.browser.is_connected():
+                    print(f"🔄 Browser not ready (attempt {attempt + 1}), initializing...")
+                    await self.initialize()
+                
+                # Create context with timeout
+                context = await asyncio.wait_for(
+                    self.browser.new_context(
+                        user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+                        viewport={'width': 1280, 'height': 720},  # Smaller viewport for less memory
+                        ignore_https_errors=True,
+                        java_script_enabled=False,  # Disable JS for faster loading
+                        extra_http_headers={'Accept-Language': 'en-US,en;q=0.9'}
+                    ),
+                    timeout=30.0  # 30 second timeout for context creation
+                )
+                
+                print(f"✅ Browser context created successfully (attempt {attempt + 1})")
+                return context
+                
+            except asyncio.TimeoutError:
+                print(f"⏱️ Context creation timeout (attempt {attempt + 1})")
+                await self._handle_browser_failure()
+                if attempt == max_attempts - 1:
+                    raise Exception("Browser context creation timed out after all retries")
+                    
+            except Exception as e:
+                print(f"⚠️ Error creating context (attempt {attempt + 1}): {e}")
+                await self._handle_browser_failure()
+                if attempt == max_attempts - 1:
+                    raise Exception(f"Failed to create browser context after {max_attempts} attempts: {e}")
+            
+            # Exponential backoff
+            wait_time = (2 ** attempt) + 1
+            print(f"⏳ Waiting {wait_time}s before retry...")
+            await asyncio.sleep(wait_time)
+    
+    async def _handle_browser_failure(self):
+        """Handle browser failures with cleanup and reinitialize"""
+        print("🔧 Handling browser failure...")
+        await self._cleanup()
+        self.retry_count += 1
+        
+        # If too many failures, wait longer
+        if self.retry_count > 2:
+            print(f"⚠️ Multiple browser failures ({self.retry_count}), waiting extra time...")
+            await asyncio.sleep(5)
     
     async def _cleanup(self):
-        """Clean up browser resources"""
+        """Enhanced cleanup with error handling"""
         try:
             if self.browser:
-                await self.browser.close()
+                try:
+                    await asyncio.wait_for(self.browser.close(), timeout=10.0)
+                except asyncio.TimeoutError:
+                    print("⏱️ Browser close timeout, forcing cleanup")
+                except:
+                    pass  # Ignore cleanup errors
+                    
             if self.playwright_instance:
-                await self.playwright_instance.stop()
+                try:
+                    await asyncio.wait_for(self.playwright_instance.stop(), timeout=10.0)
+                except asyncio.TimeoutError:
+                    print("⏱️ Playwright stop timeout")
+                except:
+                    pass  # Ignore cleanup errors
         except Exception as e:
-            print(f"⚠️ Error during cleanup: {e}")
+            print(f"⚠️ Error during cleanup (ignored): {e}")
         finally:
             self.browser = None
             self.playwright_instance = None
             self.is_initialized = False
     
     async def close(self):
-        """Close the browser pool"""
+        """Close the browser pool with enhanced cleanup"""
+        print("🔄 Closing Robust Browser Pool Manager...")
         await self._cleanup()
-        print("🔄 Browser Pool Manager closed")
+        print("✅ Robust Browser Pool Manager closed")
 
-# Global browser pool manager instance
-browser_pool = BrowserPoolManager()
+# Global robust browser pool manager
+browser_pool = RobustBrowserPoolManager()
 
 def force_install_browsers():
     """Force install browsers with cloud deployment friendly approach"""
@@ -552,23 +638,30 @@ class BorderFlowable(Flowable):
         self.canv.rect(0, 0, self.width, self.height)
 
 def update_job_progress(job_id: str, status: str, progress: str, **kwargs):
-    """Update job progress in memory"""
-    if job_id not in job_progress:
-        job_progress[job_id] = {
-            "job_id": job_id,
+    """Update job progress in memory with error handling"""
+    try:
+        if job_id not in job_progress:
+            job_progress[job_id] = {
+                "job_id": job_id,
+                "status": status,
+                "progress": progress,
+                "total_links": 0,
+                "processed_links": 0,
+                "mcqs_found": 0,
+                "pdf_url": None
+            }
+        
+        job_progress[job_id].update({
             "status": status,
             "progress": progress,
-            "total_links": 0,
-            "processed_links": 0,
-            "mcqs_found": 0,
-            "pdf_url": None
-        }
-    
-    job_progress[job_id].update({
-        "status": status,
-        "progress": progress,
-        **kwargs
-    })
+            **kwargs
+        })
+        
+        # Print progress for debugging
+        print(f"📊 Job {job_id}: {status} - {progress}")
+        
+    except Exception as e:
+        print(f"⚠️ Error updating job progress: {e}")
 
 def clean_unwanted_text(text: str) -> str:
     """Remove unwanted text strings from scraped content"""
@@ -611,65 +704,79 @@ def clean_text_for_pdf(text: str) -> str:
     
     return cleaned.strip()
 
-async def capture_page_screenshot(page, url: str, topic: str) -> Optional[bytes]:
-    """Capture screenshot of complete MCQ content (question + options + solution)"""
+async def capture_page_screenshot_robust(page, url: str, topic: str) -> Optional[bytes]:
+    """Enhanced screenshot capture with better error handling and timeouts"""
     try:
         print(f"📸 Capturing screenshot for URL: {url}")
         
-        # Navigate to the page
-        await page.goto(url, wait_until="networkidle", timeout=30000)
-        await page.wait_for_timeout(3000)  # Wait for page to fully load
+        # Navigate with timeout and error handling
+        try:
+            await asyncio.wait_for(
+                page.goto(url, wait_until="domcontentloaded", timeout=20000),
+                timeout=25.0
+            )
+        except asyncio.TimeoutError:
+            print(f"⏱️ Navigation timeout for {url}")
+            return None
         
-        # Set viewport to ensure good quality
-        await page.set_viewport_size({"width": 1920, "height": 1080})
-        await page.wait_for_timeout(1000)  # Wait for viewport adjustment
+        # Wait for page to settle
+        await page.wait_for_timeout(2000)
         
-        # Find all MCQ content elements
+        # Set smaller viewport for memory efficiency
+        await page.set_viewport_size({"width": 1280, "height": 720})
+        await page.wait_for_timeout(500)
+        
+        # Find all MCQ content elements with timeout
         mcq_elements = []
         
-        # Find question element
-        question_element = await page.query_selector('h1.questionBody.tag-h1')
-        if not question_element:
-            question_element = await page.query_selector('div.questionBody')
-        if question_element:
-            mcq_elements.append(question_element)
-            print(f"📝 Found question element")
-        
-        # Find option elements
-        option_elements = await page.query_selector_all('li.option')
-        if option_elements:
-            mcq_elements.extend(option_elements)
-            print(f"📝 Found {len(option_elements)} option elements")
-        
-        # Find solution element
-        solution_element = await page.query_selector('.solution')
-        if solution_element:
-            mcq_elements.append(solution_element)
-            print(f"📝 Found solution element")
-        
-        # Find exam source elements
-        exam_heading_element = await page.query_selector('div.pyp-heading')
-        if exam_heading_element:
-            mcq_elements.append(exam_heading_element)
-            print(f"📝 Found exam heading element")
-        
-        exam_title_element = await page.query_selector('div.pyp-title.line-ellipsis')
-        if exam_title_element:
-            mcq_elements.append(exam_title_element)
-            print(f"📝 Found exam title element")
+        try:
+            # Find question element
+            question_element = await page.query_selector('h1.questionBody.tag-h1')
+            if not question_element:
+                question_element = await page.query_selector('div.questionBody')
+            if question_element:
+                mcq_elements.append(question_element)
+                print(f"📝 Found question element")
+            
+            # Find option elements
+            option_elements = await page.query_selector_all('li.option')
+            if option_elements:
+                mcq_elements.extend(option_elements)
+                print(f"📝 Found {len(option_elements)} option elements")
+            
+            # Find solution element
+            solution_element = await page.query_selector('.solution')
+            if solution_element:
+                mcq_elements.append(solution_element)
+                print(f"📝 Found solution element")
+            
+            # Find exam source elements
+            exam_heading_element = await page.query_selector('div.pyp-heading')
+            if exam_heading_element:
+                mcq_elements.append(exam_heading_element)
+                print(f"📝 Found exam heading element")
+            
+            exam_title_element = await page.query_selector('div.pyp-title.line-ellipsis')
+            if exam_title_element:
+                mcq_elements.append(exam_title_element)
+                print(f"📝 Found exam title element")
+                
+        except Exception as e:
+            print(f"⚠️ Error finding elements: {e}")
+            return None
         
         if not mcq_elements:
             print(f"❌ No MCQ elements found on {url}")
             return None
         
-        # Calculate bounding box for all MCQ elements
+        # Calculate bounding box with error handling
         bounding_boxes = []
         for element in mcq_elements:
             try:
-                box = await element.bounding_box()
+                box = await asyncio.wait_for(element.bounding_box(), timeout=5.0)
                 if box:
                     bounding_boxes.append(box)
-            except Exception as e:
+            except (asyncio.TimeoutError, Exception) as e:
                 print(f"⚠️ Could not get bounding box for element: {e}")
                 continue
         
@@ -683,69 +790,91 @@ async def capture_page_screenshot(page, url: str, topic: str) -> Optional[bytes]
         max_x = max(box['x'] + box['width'] for box in bounding_boxes)
         max_y = max(box['y'] + box['height'] for box in bounding_boxes)
         
-        # Add some padding around the content
-        padding = 20
+        # Add padding and ensure reasonable bounds
+        padding = 10  # Reduced padding
         min_x = max(0, min_x - padding)
         min_y = max(0, min_y - padding)
         
-        # Get viewport dimensions to ensure we don't go beyond page boundaries
+        # Get viewport dimensions
         viewport = await page.evaluate("() => ({ width: window.innerWidth, height: window.innerHeight })")
-        screenshot_width = min(max_x - min_x + padding * 2, viewport['width'] - min_x)
-        screenshot_height = min(max_y - min_y + padding * 2, viewport['height'] - min_y)
+        screenshot_width = min(max_x - min_x + padding * 2, viewport['width'] - min_x, 1280)
+        screenshot_height = min(max_y - min_y + padding * 2, viewport['height'] - min_y, 720)
         
         print(f"📐 Screenshot dimensions: {screenshot_width}x{screenshot_height} at ({min_x}, {min_y})")
         
-        # Capture screenshot of the MCQ content area
-        screenshot = await page.screenshot(
-            clip={
-                "x": min_x,
-                "y": min_y,
-                "width": screenshot_width,
-                "height": screenshot_height
-            },
-            type="png"
-        )
-        
-        print(f"✅ Screenshot captured successfully for {url} - MCQ content area")
-        return screenshot
+        # Capture screenshot with timeout
+        try:
+            screenshot = await asyncio.wait_for(
+                page.screenshot(
+                    clip={
+                        "x": min_x,
+                        "y": min_y,
+                        "width": screenshot_width,
+                        "height": screenshot_height
+                    },
+                    type="png"
+                ),
+                timeout=15.0
+            )
+            
+            print(f"✅ Screenshot captured successfully for {url}")
+            return screenshot
+            
+        except asyncio.TimeoutError:
+            print(f"⏱️ Screenshot capture timeout for {url}")
+            return None
         
     except Exception as e:
         print(f"❌ Error capturing screenshot for {url}: {str(e)}")
         return None
 
-async def scrape_testbook_page_with_screenshot(context: BrowserContext, url: str, topic: str) -> Optional[dict]:
-    """Scrape Testbook page and capture screenshot - optimized with context reuse"""
+async def scrape_testbook_page_with_screenshot_robust(context: BrowserContext, url: str, topic: str) -> Optional[dict]:
+    """Enhanced screenshot scraping with robust error handling"""
     page = None
     try:
-        print(f"🔍 Processing URL with screenshot: {url}")
+        print(f"🔍 Processing URL with screenshot (robust): {url}")
         
-        # Create new page from the shared context
-        page = await context.new_page()
-        
-        # Navigate to the page
-        await page.goto(url, wait_until="networkidle", timeout=30000)
-        await page.wait_for_timeout(2000)
-        
-        # Check if page has MCQ content using the SAME selectors as text scraping
-        # Try h1.questionBody.tag-h1 first
-        question_element = await page.query_selector('h1.questionBody.tag-h1')
-        if not question_element:
-            # Fallback to .questionBody as div
-            question_element = await page.query_selector('div.questionBody')
-        
-        if not question_element:
-            print(f"❌ No MCQ content found on {url} - no questionBody element")
+        # Create page with timeout
+        try:
+            page = await asyncio.wait_for(context.new_page(), timeout=10.0)
+        except asyncio.TimeoutError:
+            print(f"⏱️ Page creation timeout for {url}")
             return None
         
-        # Extract basic MCQ data for filtering
-        mcq_data = await scrape_mcq_content_with_page(page, url, topic)
-        
-        if not mcq_data or not mcq_data.is_relevant:
-            print(f"❌ MCQ not relevant for topic '{topic}' on {url}")
+        # Check if page has MCQ content first (faster than full scraping)
+        try:
+            await asyncio.wait_for(
+                page.goto(url, wait_until="domcontentloaded", timeout=20000),
+                timeout=25.0
+            )
+        except asyncio.TimeoutError:
+            print(f"⏱️ Page load timeout for {url}")
             return None
         
-        # Capture screenshot of top 50%
-        screenshot = await capture_page_screenshot(page, url, topic)
+        await page.wait_for_timeout(1000)
+        
+        # Quick relevance check
+        try:
+            question_element = await page.query_selector('h1.questionBody.tag-h1')
+            if not question_element:
+                question_element = await page.query_selector('div.questionBody')
+            
+            if not question_element:
+                print(f"❌ No MCQ content found on {url}")
+                return None
+            
+            # Extract question text for relevance check
+            question_text = await question_element.inner_text()
+            if not is_mcq_relevant(question_text, topic):
+                print(f"❌ MCQ not relevant for topic '{topic}' on {url}")
+                return None
+                
+        except Exception as e:
+            print(f"⚠️ Error during relevance check for {url}: {e}")
+            return None
+        
+        # If relevant, capture screenshot
+        screenshot = await capture_page_screenshot_robust(page, url, topic)
         
         if not screenshot:
             print(f"❌ Failed to capture screenshot for {url}")
@@ -754,8 +883,7 @@ async def scrape_testbook_page_with_screenshot(context: BrowserContext, url: str
         return {
             "url": url,
             "screenshot": screenshot,
-            "mcq_data": mcq_data,
-            "is_relevant": mcq_data.is_relevant
+            "is_relevant": True
         }
         
     except Exception as e:
@@ -763,7 +891,10 @@ async def scrape_testbook_page_with_screenshot(context: BrowserContext, url: str
         return None
     finally:
         if page:
-            await page.close()
+            try:
+                await asyncio.wait_for(page.close(), timeout=5.0)
+            except:
+                pass  # Ignore close errors
 
 def is_mcq_relevant(question_text: str, search_topic: str) -> bool:
     """
@@ -794,7 +925,9 @@ def is_mcq_relevant(question_text: str, search_topic: str) -> bool:
         'computer': ['computing', 'software', 'hardware', 'algorithm', 'programming', 'digital', 'binary', 'data', 'internet', 'technology'],
         'science': ['scientific', 'research', 'theory', 'experiment', 'hypothesis', 'discovery', 'planet', 'solar', 'universe', 'nature'],
         'english': ['grammar', 'vocabulary', 'literature', 'language', 'sentence', 'word', 'comprehension', 'reading', 'writing'],
-        'reasoning': ['logical', 'logic', 'puzzle', 'pattern', 'sequence', 'analogy', 'verbal', 'analytical', 'solve', 'problem']
+        'reasoning': ['logical', 'logic', 'puzzle', 'pattern', 'sequence', 'analogy', 'verbal', 'analytical', 'solve', 'problem'],
+        'cell': ['cellular', 'membrane', 'nucleus', 'mitosis', 'meiosis', 'organelle', 'cytoplasm', 'ribosome', 'mitochondria', 'chromosome'],
+        'mitosis': ['cell', 'division', 'chromosome', 'spindle', 'kinetochore', 'centromere', 'anaphase', 'metaphase', 'prophase', 'telophase']
     }
     
     # Add stems for the search topic
@@ -831,40 +964,6 @@ def is_mcq_relevant(question_text: str, search_topic: str) -> bool:
             matched_term = variation
             break
     
-    # If no direct match found, try broader contextual matching
-    if not is_relevant:
-        # Check if question contains educational/academic keywords
-        educational_keywords = ['what', 'which', 'when', 'where', 'how', 'why', 'identify', 'calculate', 'find', 'determine', 'solve', 'name']
-        has_educational_structure = any(keyword in question_lower for keyword in educational_keywords)
-        
-        if has_educational_structure:
-            # Check for contextual relevance based on question content
-            question_words = set(question_lower.split())
-            
-            # Context-based matching for different subjects
-            subject_contexts = {
-                'geography': ['capital', 'country', 'city', 'ocean', 'river', 'mountain', 'continent', 'largest', 'smallest', 'located', 'where'],
-                'mathematics': ['calculate', 'area', 'radius', 'circle', 'triangle', 'number', 'equation', 'formula', 'solve', 'add', 'subtract'],
-                'biology': ['living', 'organism', 'plant', 'animal', 'cell', 'life', 'species', 'photosynthesis', 'respiration', 'organ'],
-                'chemistry': ['formula', 'compound', 'element', 'molecule', 'atom', 'reaction', 'chemical', 'acid', 'base', 'water'],
-                'physics': ['force', 'energy', 'motion', 'matter', 'gravity', 'electricity', 'magnetism', 'wave', 'particle'],
-                'history': ['war', 'battle', 'year', 'century', 'ancient', 'period', 'empire', 'dynasty', 'when', 'ended', 'started'],
-                'politics': ['government', 'democracy', 'election', 'president', 'minister', 'parliament', 'governance', 'policy'],
-                'science': ['planet', 'solar', 'universe', 'theory', 'experiment', 'discovery', 'research', 'scientific'],
-                'heart': ['organ', 'blood', 'pump', 'body', 'circulation', 'cardiac', 'artery', 'vein'],
-                'computer': ['software', 'hardware', 'algorithm', 'programming', 'digital', 'data', 'internet', 'technology'],
-                'english': ['grammar', 'vocabulary', 'language', 'sentence', 'word', 'reading', 'writing', 'literature'],
-                'reasoning': ['logic', 'puzzle', 'pattern', 'sequence', 'analogy', 'solve', 'problem', 'logical']
-            }
-            
-            # Check if question words overlap with subject context
-            if topic_lower in subject_contexts:
-                context_words = set(subject_contexts[topic_lower])
-                overlap = question_words.intersection(context_words)
-                if overlap:
-                    is_relevant = True
-                    matched_term = f"contextual: {', '.join(overlap)}"
-    
     return is_relevant
 
 async def search_google_custom(topic: str, exam_type: str = "SSC") -> List[str]:
@@ -884,7 +983,7 @@ async def search_google_custom(topic: str, exam_type: str = "SSC") -> List[str]:
     
     all_testbook_links = []
     start_index = 1
-    max_results = 100
+    max_results = 50  # Reduced for better performance
     
     try:
         while start_index <= max_results:
@@ -955,90 +1054,94 @@ async def search_google_custom(topic: str, exam_type: str = "SSC") -> List[str]:
             print(f"Response text: {e.response.text}")
         return []
 
-async def scrape_mcq_content_with_page(page, url: str, search_topic: str) -> Optional[MCQData]:
-    """
-    Scrape MCQ content using an existing page - optimized for browser pool manager
-    CRITICAL: Only scrape MCQs where questionBody contains the search topic.
-    """
+async def scrape_mcq_content_with_page_robust(page, url: str, search_topic: str) -> Optional[MCQData]:
+    """Enhanced MCQ scraping with robust error handling and timeouts"""
     try:
-        # Navigate to page with faster loading strategy
-        await page.goto(url, wait_until='domcontentloaded', timeout=20000)
+        # Navigate with timeout
+        try:
+            await asyncio.wait_for(
+                page.goto(url, wait_until='domcontentloaded', timeout=15000),
+                timeout=20.0
+            )
+        except asyncio.TimeoutError:
+            print(f"⏱️ Navigation timeout for {url}")
+            return None
         
-        # Reduced wait time for faster processing
+        # Reduced wait time
         await page.wait_for_timeout(1000)
         
-        # Extract question using correct selectors with faster approach
+        # Extract question with timeout
         question = ""
+        try:
+            question_selectors = ['h1.questionBody.tag-h1', 'div.questionBody']
+            for selector in question_selectors:
+                try:
+                    element = await asyncio.wait_for(page.query_selector(selector), timeout=5.0)
+                    if element:
+                        question = await asyncio.wait_for(element.inner_text(), timeout=5.0)
+                        break
+                except asyncio.TimeoutError:
+                    continue
+        except Exception as e:
+            print(f"⚠️ Error extracting question from {url}: {e}")
+            return None
         
-        # Try both selectors concurrently
-        question_selectors = ['h1.questionBody.tag-h1', 'div.questionBody']
-        question_elements = await asyncio.gather(
-            *[page.query_selector(selector) for selector in question_selectors],
-            return_exceptions=True
-        )
+        if not question:
+            print(f"❌ No question found on {url}")
+            return None
         
-        # Use the first successful result
-        question_element = None
-        for element in question_elements:
-            if element and not isinstance(element, Exception):
-                question_element = element
-                break
-        
-        if question_element:
-            question = await question_element.inner_text()
-            
         # Clean question text
-        if question:
-            question = clean_unwanted_text(question)
+        question = clean_unwanted_text(question)
         
-        # CRITICAL NEW FILTERING: Check topic relevance BEFORE processing options/solution
-        print(f"🔍 DEBUG: Extracted question text: '{question[:100]}...' (length: {len(question)})")
-        print(f"🔍 DEBUG: Search topic: '{search_topic}'")
-        
+        # Check topic relevance
+        print(f"🔍 DEBUG: Checking relevance for: '{question[:100]}...'")
         if not is_mcq_relevant(question, search_topic):
-            print(f"❌ MCQ skipped - topic '{search_topic}' not found in question body")
-            print(f"🔍 DEBUG: Question text was: '{question}'")
+            print(f"❌ MCQ not relevant for topic '{search_topic}'")
             return None
         
         print(f"✅ MCQ relevant - topic '{search_topic}' found in question body")
         
-        # Extract options, answer, and exam source concurrently for speed
-        option_elements_task = page.query_selector_all('li.option')
-        answer_element_task = page.query_selector('.solution')
-        exam_heading_element_task = page.query_selector('div.pyp-heading')
-        exam_title_element_task = page.query_selector('div.pyp-title.line-ellipsis')
-        
-        # Wait for all tasks to complete
-        option_elements, answer_element, exam_heading_element, exam_title_element = await asyncio.gather(
-            option_elements_task, answer_element_task, exam_heading_element_task, exam_title_element_task
-        )
-        
-        # Process options
+        # Extract other elements with timeout (simplified)
         options = []
-        if option_elements:
-            option_tasks = [option_elem.inner_text() for option_elem in option_elements]
-            option_texts = await asyncio.gather(*option_tasks)
-            options = [clean_unwanted_text(text.strip()) for text in option_texts if text.strip()]
-        
-        # Process answer
         answer = ""
-        if answer_element:
-            answer = await answer_element.inner_text()
-            answer = clean_unwanted_text(answer)
-        
-        # Process exam source information
         exam_source_heading = ""
         exam_source_title = ""
         
-        if exam_heading_element:
-            exam_source_heading = await exam_heading_element.inner_text()
-            exam_source_heading = clean_unwanted_text(exam_source_heading)
+        try:
+            # Options
+            option_elements = await asyncio.wait_for(page.query_selector_all('li.option'), timeout=5.0)
+            if option_elements:
+                for option_elem in option_elements:
+                    try:
+                        option_text = await asyncio.wait_for(option_elem.inner_text(), timeout=3.0)
+                        options.append(clean_unwanted_text(option_text.strip()))
+                    except asyncio.TimeoutError:
+                        continue
+            
+            # Answer
+            answer_element = await asyncio.wait_for(page.query_selector('.solution'), timeout=3.0)
+            if answer_element:
+                answer = await asyncio.wait_for(answer_element.inner_text(), timeout=3.0)
+                answer = clean_unwanted_text(answer)
+            
+            # Exam source (optional)
+            try:
+                exam_heading_element = await asyncio.wait_for(page.query_selector('div.pyp-heading'), timeout=2.0)
+                if exam_heading_element:
+                    exam_source_heading = await asyncio.wait_for(exam_heading_element.inner_text(), timeout=2.0)
+                    exam_source_heading = clean_unwanted_text(exam_source_heading)
+                
+                exam_title_element = await asyncio.wait_for(page.query_selector('div.pyp-title.line-ellipsis'), timeout=2.0)
+                if exam_title_element:
+                    exam_source_title = await asyncio.wait_for(exam_title_element.inner_text(), timeout=2.0)
+                    exam_source_title = clean_unwanted_text(exam_source_title)
+            except asyncio.TimeoutError:
+                pass  # Exam source is optional
+                
+        except asyncio.TimeoutError:
+            print(f"⏱️ Timeout extracting elements from {url}")
         
-        if exam_title_element:
-            exam_source_title = await exam_title_element.inner_text()
-            exam_source_title = clean_unwanted_text(exam_source_title)
-        
-        # Return enhanced MCQ data if we found content
+        # Return MCQ data if we have essential content
         if question and (options or answer):
             return MCQData(
                 question=question.strip(),
@@ -1055,36 +1158,61 @@ async def scrape_mcq_content_with_page(page, url: str, search_topic: str) -> Opt
         print(f"❌ Error scraping {url}: {e}")
         return None
 
-async def scrape_mcq_content(url: str, search_topic: str) -> Optional[MCQData]:
-    """
-    OPTIMIZED: Scrape MCQ content using the browser pool manager
-    This prevents resource exhaustion by reusing browser contexts
-    """
+async def scrape_mcq_content_robust(url: str, search_topic: str) -> Optional[MCQData]:
+    """Enhanced MCQ scraping with robust browser pool management"""
     context = None
     page = None
-    try:
-        # Get context from browser pool instead of creating new browser
-        context = await browser_pool.get_context()
-        page = await context.new_page()
-        
-        result = await scrape_mcq_content_with_page(page, url, search_topic)
-        return result
-        
-    except Exception as e:
-        print(f"❌ Error scraping {url}: {e}")
-        return None
-    finally:
-        # Clean up resources properly
-        if page:
+    max_attempts = 2
+    
+    for attempt in range(max_attempts):
+        try:
+            print(f"🔍 Scraping attempt {attempt + 1} for {url}")
+            
+            # Get context from robust browser pool
             try:
-                await page.close()
-            except:
-                pass
-        if context:
+                context = await browser_pool.get_context()
+            except Exception as e:
+                print(f"⚠️ Failed to get browser context (attempt {attempt + 1}): {e}")
+                if attempt == max_attempts - 1:
+                    return None
+                await asyncio.sleep(2)
+                continue
+            
+            # Create page with timeout
             try:
-                await context.close()
-            except:
-                pass
+                page = await asyncio.wait_for(context.new_page(), timeout=10.0)
+            except asyncio.TimeoutError:
+                print(f"⏱️ Page creation timeout (attempt {attempt + 1})")
+                if context:
+                    await context.close()
+                if attempt == max_attempts - 1:
+                    return None
+                await asyncio.sleep(2)
+                continue
+            
+            # Scrape content
+            result = await scrape_mcq_content_with_page_robust(page, url, search_topic)
+            return result
+            
+        except Exception as e:
+            print(f"❌ Error in scraping attempt {attempt + 1} for {url}: {e}")
+            if attempt == max_attempts - 1:
+                return None
+            await asyncio.sleep(2)
+        finally:
+            # Clean up resources
+            if page:
+                try:
+                    await asyncio.wait_for(page.close(), timeout=5.0)
+                except:
+                    pass
+            if context:
+                try:
+                    await asyncio.wait_for(context.close(), timeout=5.0)
+                except:
+                    pass
+    
+    return None
 
 def generate_pdf(mcqs: List[MCQData], topic: str, job_id: str, relevant_mcqs: int, irrelevant_mcqs: int, total_links: int) -> str:
     """Generate a professionally formatted PDF with enhanced visual design and filtering statistics"""
@@ -1135,16 +1263,6 @@ def generate_pdf(mcqs: List[MCQData], topic: str, job_id: str, relevant_mcqs: in
             fontName='Helvetica-Bold'
         )
         
-        stats_style = ParagraphStyle(
-            'StatsStyle',
-            parent=styles['Normal'],
-            fontSize=12,
-            spaceAfter=12,
-            alignment=TA_CENTER,
-            textColor=accent_color,
-            fontName='Helvetica-Bold'
-        )
-        
         question_header_style = ParagraphStyle(
             'QuestionHeaderStyle',
             parent=styles['Normal'],
@@ -1167,7 +1285,7 @@ def generate_pdf(mcqs: List[MCQData], topic: str, job_id: str, relevant_mcqs: in
             rightIndent=10,
             fontName='Helvetica-Bold',
             textColor=text_color,
-            leading=18  # Improved line spacing
+            leading=18
         )
         
         option_style = ParagraphStyle(
@@ -1214,11 +1332,11 @@ def generate_pdf(mcqs: List[MCQData], topic: str, job_id: str, relevant_mcqs: in
         story.append(Paragraph(f"Subject: <b>{topic.upper()}</b>", subtitle_style))
         story.append(Spacer(1, 0.3*inch))
         
-        # Enhanced statistics section with professional table INCLUDING FILTERING STATS
+        # Enhanced statistics section
         stats_data = [
             ['📊 Collection Statistics', ''],
             ['Search Topic', f'{topic}'],
-            ['Total Relevant Questions', f'{len(mcqs)}'],  # Only relevant MCQs
+            ['Total Relevant Questions', f'{len(mcqs)}'],
             ['Filtering Applied', 'Topic-based (Question Body Only)'],
             ['Generated On', f'{datetime.now().strftime("%B %d, %Y at %I:%M %p")}'],
             ['Source', 'Testbook.com (SSC Focus)'],
@@ -1243,79 +1361,19 @@ def generate_pdf(mcqs: List[MCQData], topic: str, job_id: str, relevant_mcqs: in
         ]))
         
         story.append(stats_table)
-        story.append(Spacer(1, 0.2*inch))
-        
-        # NEW: Filtering Statistics Table
-        filtering_data = [
-            ['🔍 Smart Filtering Results', ''],
-            ['Total Links Searched', f'{total_links}'],
-            ['Relevant MCQs Found', f'{relevant_mcqs}'],
-            ['Irrelevant MCQs Skipped', f'{irrelevant_mcqs}'],
-            ['Filtering Efficiency', f'{round((relevant_mcqs / total_links) * 100, 1)}%'],
-            ['Topic Match Success', f'{round((relevant_mcqs / (relevant_mcqs + irrelevant_mcqs)) * 100, 1)}%']
-        ]
-        
-        filtering_table = Table(filtering_data, colWidths=[2.5*inch, 2.5*inch])
-        filtering_table.setStyle(TableStyle([
-            ('BACKGROUND', (0, 0), (-1, 0), accent_color),
-            ('TEXTCOLOR', (0, 0), (-1, 0), white),
-            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-            ('FONTSIZE', (0, 0), (-1, 0), 12),
-            ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
-            ('BACKGROUND', (0, 1), (-1, -1), light_color),
-            ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
-            ('FONTSIZE', (0, 1), (-1, -1), 10),
-            ('GRID', (0, 0), (-1, -1), 1, accent_color),
-            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-            ('TOPPADDING', (0, 1), (-1, -1), 8),
-            ('BOTTOMPADDING', (0, 1), (-1, -1), 8)
-        ]))
-        
-        story.append(filtering_table)
         story.append(Spacer(1, 0.4*inch))
         
         # Professional separator
         story.append(Paragraph("═" * 80, ParagraphStyle('separator', textColor=primary_color, alignment=TA_CENTER)))
         story.append(PageBreak())
         
-        # Table of Contents for large collections
-        if len(mcqs) > 15:
-            story.append(Paragraph("📋 TABLE OF CONTENTS", question_header_style))
-            story.append(Spacer(1, 0.2*inch))
-            
-            toc_data = [['No.', 'Question Preview', 'Page']]
-            for i, mcq in enumerate(mcqs[:50], 1):  # Limit TOC to first 50 questions
-                question_preview = (mcq.question[:70] + "...") if len(mcq.question) > 70 else mcq.question
-                page_num = f"Page {((i-1)//2) + 3}"  # Rough page calculation
-                toc_data.append([str(i), question_preview, page_num])
-            
-            toc_table = Table(toc_data, colWidths=[0.5*inch, 4*inch, 1*inch])
-            toc_table.setStyle(TableStyle([
-                ('BACKGROUND', (0, 0), (-1, 0), primary_color),
-                ('TEXTCOLOR', (0, 0), (-1, 0), white),
-                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-                ('FONTSIZE', (0, 0), (-1, 0), 10),
-                ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
-                ('ALIGN', (0, 0), (0, -1), 'CENTER'),
-                ('ALIGN', (2, 0), (2, -1), 'CENTER'),
-                ('GRID', (0, 0), (-1, -1), 1, primary_color),
-                ('FONTSIZE', (0, 1), (-1, -1), 9),
-                ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-                ('TOPPADDING', (0, 0), (-1, -1), 6),
-                ('BOTTOMPADDING', (0, 0), (-1, -1), 6)
-            ]))
-            
-            story.append(toc_table)
-            story.append(PageBreak())
-        
-        # Enhanced MCQ content with professional formatting
+        # Enhanced MCQ content
         for i, mcq in enumerate(mcqs, 1):
             # Professional question header
             story.append(Paragraph(f"QUESTION {i} OF {len(mcqs)}", question_header_style))
             story.append(Spacer(1, 0.1*inch))
             
-            # NEW: Exam source information display
+            # Exam source information
             if mcq.exam_source_heading or mcq.exam_source_title:
                 exam_source_text = ""
                 if mcq.exam_source_heading:
@@ -1327,12 +1385,12 @@ def generate_pdf(mcqs: List[MCQData], topic: str, job_id: str, relevant_mcqs: in
                     story.append(Paragraph(exam_source_text, exam_source_style))
                     story.append(Spacer(1, 0.1*inch))
             
-            # Question content with enhanced formatting
+            # Question content
             question_text = mcq.question.replace('\n', '<br/>')
             story.append(Paragraph(f"<b>Q{i}:</b> {question_text}", question_style))
             story.append(Spacer(1, 0.15*inch))
             
-            # Options with professional styling
+            # Options
             if mcq.options:
                 story.append(Paragraph("📝 <b>OPTIONS:</b>", option_style))
                 for j, option in enumerate(mcq.options):
@@ -1342,7 +1400,7 @@ def generate_pdf(mcqs: List[MCQData], topic: str, job_id: str, relevant_mcqs: in
             
             story.append(Spacer(1, 0.2*inch))
             
-            # Answer with professional formatting
+            # Answer
             if mcq.answer:
                 story.append(Paragraph("💡 <b>ANSWER & DETAILED SOLUTION:</b>", answer_style))
                 answer_text = mcq.answer.replace('\n', '<br/>')
@@ -1353,51 +1411,11 @@ def generate_pdf(mcqs: List[MCQData], topic: str, job_id: str, relevant_mcqs: in
             story.append(Paragraph("─" * 100, ParagraphStyle('divider', textColor=primary_color, alignment=TA_CENTER, fontSize=8)))
             story.append(Spacer(1, 0.25*inch))
             
-            # Add page break every 2 questions for better readability
+            # Page break every 2 questions
             if i % 2 == 0 and i < len(mcqs):
                 story.append(PageBreak())
         
-        # Professional footer section
-        story.append(PageBreak())
-        story.append(Paragraph("🎯 COLLECTION COMPLETE", title_style))
-        story.append(Spacer(1, 0.3*inch))
-        
-        # Summary table with filtering info
-        summary_data = [
-            ['📈 SUMMARY STATISTICS', ''],
-            ['Total Questions Collected', f'{len(mcqs)}'],
-            ['Subject Area', f'{topic}'],
-            ['Source Platform', 'Testbook.com (SSC Focus)'],
-            ['Quality Level', 'Professional Grade'],
-            ['Filtering Applied', 'Smart Topic-based Filtering'],
-            ['Generated By', 'Testbook MCQ Extractor'],
-            ['Generated On', f'{datetime.now().strftime("%B %d, %Y at %I:%M %p")}']
-        ]
-        
-        summary_table = Table(summary_data, colWidths=[2.5*inch, 2.5*inch])
-        summary_table.setStyle(TableStyle([
-            ('BACKGROUND', (0, 0), (-1, 0), accent_color),
-            ('TEXTCOLOR', (0, 0), (-1, 0), white),
-            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-            ('FONTSIZE', (0, 0), (-1, 0), 12),
-            ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
-            ('BACKGROUND', (0, 1), (-1, -1), light_color),
-            ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
-            ('FONTSIZE', (0, 1), (-1, -1), 10),
-            ('GRID', (0, 0), (-1, -1), 1, accent_color),
-            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-            ('TOPPADDING', (0, 1), (-1, -1), 8),
-            ('BOTTOMPADDING', (0, 1), (-1, -1), 8)
-        ]))
-        
-        story.append(summary_table)
-        story.append(Spacer(1, 0.3*inch))
-        
-        story.append(Paragraph("Thank you for using the Enhanced SSC-Focused Testbook MCQ Extractor!", 
-                             ParagraphStyle('thanks', textColor=primary_color, alignment=TA_CENTER, fontSize=12, fontName='Helvetica-Bold')))
-        
-        # Build PDF with enhanced settings
+        # Build PDF
         doc.build(story)
         
         print(f"✅ Professional PDF generated successfully: {filename} with {len(mcqs)} relevant MCQs")
@@ -1489,8 +1507,8 @@ def generate_image_based_pdf(screenshots_data: List[dict], topic: str, exam_type
             img_buffer.seek(0)
             
             # Calculate dimensions to fit page
-            page_width = letter[0] - 2*inch  # Leave margins
-            page_height = letter[1] - 3*inch  # Leave space for header/footer
+            page_width = letter[0] - 2*inch
+            page_height = letter[1] - 3*inch
             
             # Calculate aspect ratio
             img_width, img_height = screenshot_pil.size
@@ -1513,22 +1531,6 @@ def generate_image_based_pdf(screenshots_data: List[dict], topic: str, exam_type
             if i < len(screenshots_data):
                 story.append(PageBreak())
         
-        # Summary page
-        story.append(PageBreak())
-        story.append(Paragraph("📊 SUMMARY", title_style))
-        story.append(Spacer(1, 0.3*inch))
-        
-        summary_text = f"""
-        Total Screenshots: {len(screenshots_data)}<br/>
-        Topic: {topic}<br/>
-        Exam Type: {exam_type}<br/>
-        Format: Image-based PDF<br/>
-        Generated: {datetime.now().strftime('%B %d, %Y at %I:%M %p')}<br/>
-        Source: Testbook.com
-        """
-        
-        story.append(Paragraph(summary_text, styles['Normal']))
-        
         # Build PDF
         doc.build(story)
         
@@ -1540,14 +1542,11 @@ def generate_image_based_pdf(screenshots_data: List[dict], topic: str, exam_type
         raise
 
 async def process_mcq_extraction(job_id: str, topic: str, exam_type: str = "SSC", pdf_format: str = "text"):
-    """
-    Enhanced processing with topic-based filtering and support for both text and image PDFs.
-    CRITICAL: Only process MCQs where questionBody contains the search topic.
-    """
+    """Enhanced processing with robust error handling"""
     try:
         update_job_progress(job_id, "running", f"🔍 Searching for {exam_type} '{topic}' results with smart filtering...")
         
-        # Search for ALL available links with key rotation
+        # Search for links
         links = await search_google_custom(topic, exam_type)
         
         if not links:
@@ -1559,189 +1558,196 @@ async def process_mcq_extraction(job_id: str, topic: str, exam_type: str = "SSC"
                           total_links=len(links))
         
         if pdf_format == "image":
-            # Process screenshots for image-based PDF
-            await process_screenshot_extraction(job_id, topic, exam_type, links)
+            await process_screenshot_extraction_robust(job_id, topic, exam_type, links)
         else:
-            # Process text-based PDF (existing functionality)
-            await process_text_extraction_optimized(job_id, topic, exam_type, links)
+            await process_text_extraction_robust(job_id, topic, exam_type, links)
         
     except Exception as e:
         error_message = str(e)
-        if "All Servers are exhausted due to intense use" in error_message:
-            update_job_progress(job_id, "error", "❌ All Servers are exhausted due to intense use")
-        else:
-            update_job_progress(job_id, "error", f"❌ Error: {error_message}")
-        print(f"❌ Error in process_mcq_extraction: {e}")
+        print(f"❌ Critical error in process_mcq_extraction: {e}")
+        update_job_progress(job_id, "error", f"❌ Error: {error_message}")
 
-async def process_text_extraction_optimized(job_id: str, topic: str, exam_type: str, links: List[str]):
-    """
-    OPTIMIZED: Process text-based MCQ extraction with smart browser resource management
-    This fixes the resource exhaustion issue by using sequential processing with the browser pool
-    """
-    # Initialize browser pool
-    await browser_pool.initialize()
-    
-    # Extract MCQs with filtering
-    mcqs = []
-    relevant_mcqs = 0
-    irrelevant_mcqs = 0
-    
-    print(f"🚀 Starting OPTIMIZED processing: {len(links)} links sequentially with browser pool reuse")
-    
-    # Process URLs sequentially to prevent resource exhaustion
-    for i, url in enumerate(links):
-        print(f"🔍 Processing link {i + 1}/{len(links)}: {url}")
-        
-        current_progress = f"🔍 Processing link {i + 1}/{len(links)} - Smart filtering enabled..."
-        update_job_progress(job_id, "running", current_progress, 
-                          processed_links=i, mcqs_found=len(mcqs))
-        
-        # Process single URL with optimized scraping
-        try:
-            result = await scrape_mcq_content(url, topic)
-            
-            if result:
-                mcqs.append(result)
-                relevant_mcqs += 1
-                print(f"✅ Found relevant MCQ {i + 1}/{len(links)} - Topic: '{topic}' found in question! Total: {len(mcqs)}")
-            else:
-                irrelevant_mcqs += 1
-                print(f"⚠️ Skipped irrelevant MCQ {i + 1}/{len(links)} - Topic: '{topic}' not in question. Total: {len(mcqs)}")
-                
-        except Exception as e:
-            print(f"❌ Error processing link {i + 1}: {e}")
-            irrelevant_mcqs += 1
-        
-        # Update progress after each URL
-        update_job_progress(job_id, "running", 
-                          f"✅ Processed {i + 1}/{len(links)} links - Found {len(mcqs)} relevant MCQs", 
-                          processed_links=i + 1, mcqs_found=len(mcqs))
-        
-        # Small delay between URLs to be respectful to the server and prevent overload
-        if i < len(links) - 1:  # Don't delay after last link
-            await asyncio.sleep(1)
-    
-    # Clean up browser pool after processing
-    await browser_pool.close()
-    
-    if not mcqs:
-        update_job_progress(job_id, "completed", 
-                          f"❌ No relevant MCQs found for '{topic}' across {len(links)} links. Please try another topic or check your search terms.", 
-                          total_links=len(links), processed_links=len(links), mcqs_found=0)
-        return
-    
-    # Enhanced completion message with filtering statistics
-    final_message = f"✅ Smart filtering complete! Found {relevant_mcqs} relevant MCQs (topic '{topic}' in question body) from {len(links)} total links. Skipped {irrelevant_mcqs} irrelevant MCQs."
-    update_job_progress(job_id, "running", final_message + " Generating PDF...", 
-                      total_links=len(links), processed_links=len(links), mcqs_found=len(mcqs))
-    
-    # Generate PDF
+async def process_text_extraction_robust(job_id: str, topic: str, exam_type: str, links: List[str]):
+    """Robust text-based MCQ extraction"""
     try:
-        filename = generate_pdf(mcqs, topic, job_id, relevant_mcqs, irrelevant_mcqs, len(links))
-        pdf_url = f"/api/download-pdf/{filename}"
+        # Initialize browser pool
+        await browser_pool.initialize()
         
-        generated_pdfs[job_id] = {
-            "filename": filename,
-            "topic": topic,
-            "exam_type": exam_type,
-            "mcqs_count": len(mcqs),
-            "generated_at": datetime.now()
-        }
+        mcqs = []
+        relevant_mcqs = 0
+        irrelevant_mcqs = 0
         
-        success_message = f"🎉 SUCCESS! Generated PDF with {len(mcqs)} relevant MCQs for topic '{topic}'. Smart filtering skipped {irrelevant_mcqs} irrelevant questions."
-        update_job_progress(job_id, "completed", success_message, 
-                          total_links=len(links), processed_links=len(links), 
-                          mcqs_found=len(mcqs), pdf_url=pdf_url)
+        print(f"🚀 Starting ROBUST text processing: {len(links)} links sequentially")
         
-        print(f"✅ Job {job_id} completed successfully with {len(mcqs)} MCQs")
-        
-    except Exception as e:
-        print(f"❌ Error generating PDF: {e}")
-        update_job_progress(job_id, "error", f"❌ Error generating PDF: {str(e)}")
-
-async def process_screenshot_extraction(job_id: str, topic: str, exam_type: str, links: List[str]):
-    """Process screenshot-based MCQ extraction - optimized version"""
-    # Initialize browser pool
-    await browser_pool.initialize()
-    
-    screenshot_data = []
-    relevant_mcqs = 0
-    irrelevant_mcqs = 0
-    
-    print(f"🚀 Starting OPTIMIZED screenshot processing: {len(links)} links")
-    
-    # Process URLs sequentially for screenshot capture
-    for i, url in enumerate(links):
-        print(f"📸 Processing screenshot {i + 1}/{len(links)}: {url}")
-        
-        current_progress = f"📸 Capturing screenshot {i + 1}/{len(links)} - Smart filtering enabled..."
-        update_job_progress(job_id, "running", current_progress, 
-                          processed_links=i, mcqs_found=len(screenshot_data))
-        
-        try:
-            # Get context from browser pool
-            context = await browser_pool.get_context()
-            result = await scrape_testbook_page_with_screenshot(context, url, topic)
+        # Process URLs one by one for maximum stability
+        for i, url in enumerate(links):
+            print(f"🔍 Processing link {i + 1}/{len(links)}: {url}")
             
-            if result and result.get('is_relevant'):
-                screenshot_data.append(result)
-                relevant_mcqs += 1
-                print(f"✅ Captured relevant screenshot {i + 1}/{len(links)} - Total: {len(screenshot_data)}")
-            else:
-                irrelevant_mcqs += 1
-                print(f"⚠️ Skipped irrelevant screenshot {i + 1}/{len(links)}")
+            current_progress = f"🔍 Processing link {i + 1}/{len(links)} - Smart filtering enabled..."
+            update_job_progress(job_id, "running", current_progress, 
+                              processed_links=i, mcqs_found=len(mcqs))
+            
+            try:
+                result = await scrape_mcq_content_robust(url, topic)
                 
-            await context.close()
+                if result:
+                    mcqs.append(result)
+                    relevant_mcqs += 1
+                    print(f"✅ Found relevant MCQ {i + 1}/{len(links)} - Total: {len(mcqs)}")
+                else:
+                    irrelevant_mcqs += 1
+                    print(f"⚠️ Skipped irrelevant MCQ {i + 1}/{len(links)}")
+                    
+            except Exception as e:
+                print(f"❌ Error processing link {i + 1}: {e}")
+                irrelevant_mcqs += 1
             
-        except Exception as e:
-            print(f"❌ Error capturing screenshot {i + 1}: {e}")
-            irrelevant_mcqs += 1
+            # Update progress
+            update_job_progress(job_id, "running", 
+                              f"✅ Processed {i + 1}/{len(links)} links - Found {len(mcqs)} relevant MCQs", 
+                              processed_links=i + 1, mcqs_found=len(mcqs))
+            
+            # Delay to prevent overload
+            if i < len(links) - 1:
+                await asyncio.sleep(1)
         
-        # Update progress
-        update_job_progress(job_id, "running", 
-                          f"✅ Processed {i + 1}/{len(links)} links - Captured {len(screenshot_data)} relevant screenshots", 
-                          processed_links=i + 1, mcqs_found=len(screenshot_data))
+        # Clean up browser pool
+        await browser_pool.close()
         
-        # Small delay between screenshots
-        if i < len(links) - 1:
-            await asyncio.sleep(1)
-    
-    # Clean up browser pool
-    await browser_pool.close()
-    
-    if not screenshot_data:
-        update_job_progress(job_id, "completed", 
-                          f"❌ No relevant screenshots captured for '{topic}'. Please try another topic.", 
-                          total_links=len(links), processed_links=len(links), mcqs_found=0)
-        return
-    
-    # Generate image-based PDF
-    try:
-        final_message = f"✅ Screenshot capture complete! Captured {relevant_mcqs} relevant screenshots from {len(links)} total links."
+        if not mcqs:
+            update_job_progress(job_id, "completed", 
+                              f"❌ No relevant MCQs found for '{topic}' across {len(links)} links. Please try another topic.", 
+                              total_links=len(links), processed_links=len(links), mcqs_found=0)
+            return
+        
+        # Generate PDF
+        final_message = f"✅ Smart filtering complete! Found {relevant_mcqs} relevant MCQs from {len(links)} total links."
         update_job_progress(job_id, "running", final_message + " Generating PDF...", 
-                          total_links=len(links), processed_links=len(links), mcqs_found=len(screenshot_data))
+                          total_links=len(links), processed_links=len(links), mcqs_found=len(mcqs))
         
-        filename = generate_image_based_pdf(screenshot_data, topic, exam_type)
-        pdf_url = f"/api/download-pdf/{filename}"
-        
-        generated_pdfs[job_id] = {
-            "filename": filename,
-            "topic": topic,
-            "exam_type": exam_type,
-            "mcqs_count": len(screenshot_data),
-            "generated_at": datetime.now()
-        }
-        
-        success_message = f"🎉 SUCCESS! Generated image-based PDF with {len(screenshot_data)} relevant screenshots for topic '{topic}'."
-        update_job_progress(job_id, "completed", success_message, 
-                          total_links=len(links), processed_links=len(links), 
-                          mcqs_found=len(screenshot_data), pdf_url=pdf_url)
-        
-        print(f"✅ Screenshot job {job_id} completed successfully with {len(screenshot_data)} images")
-        
+        try:
+            filename = generate_pdf(mcqs, topic, job_id, relevant_mcqs, irrelevant_mcqs, len(links))
+            pdf_url = f"/api/download-pdf/{filename}"
+            
+            generated_pdfs[job_id] = {
+                "filename": filename,
+                "topic": topic,
+                "exam_type": exam_type,
+                "mcqs_count": len(mcqs),
+                "generated_at": datetime.now()
+            }
+            
+            success_message = f"🎉 SUCCESS! Generated PDF with {len(mcqs)} relevant MCQs for topic '{topic}'."
+            update_job_progress(job_id, "completed", success_message, 
+                              total_links=len(links), processed_links=len(links), 
+                              mcqs_found=len(mcqs), pdf_url=pdf_url)
+            
+            print(f"✅ Job {job_id} completed successfully with {len(mcqs)} MCQs")
+            
+        except Exception as e:
+            print(f"❌ Error generating PDF: {e}")
+            update_job_progress(job_id, "error", f"❌ Error generating PDF: {str(e)}")
+    
     except Exception as e:
-        print(f"❌ Error generating image PDF: {e}")
-        update_job_progress(job_id, "error", f"❌ Error generating image PDF: {str(e)}")
+        print(f"❌ Critical error in text extraction: {e}")
+        update_job_progress(job_id, "error", f"❌ Critical error: {str(e)}")
+        await browser_pool.close()
+
+async def process_screenshot_extraction_robust(job_id: str, topic: str, exam_type: str, links: List[str]):
+    """Enhanced screenshot extraction with robust error handling"""
+    try:
+        # Initialize browser pool
+        await browser_pool.initialize()
+        
+        screenshot_data = []
+        relevant_mcqs = 0
+        irrelevant_mcqs = 0
+        
+        print(f"🚀 Starting ROBUST screenshot processing: {len(links)} links")
+        
+        # Process URLs one by one for maximum stability
+        for i, url in enumerate(links):
+            print(f"📸 Processing screenshot {i + 1}/{len(links)}: {url}")
+            
+            current_progress = f"📸 Capturing screenshot {i + 1}/{len(links)} - Smart filtering enabled..."
+            update_job_progress(job_id, "running", current_progress, 
+                              processed_links=i, mcqs_found=len(screenshot_data))
+            
+            max_attempts = 2
+            for attempt in range(max_attempts):
+                try:
+                    # Get context with retries
+                    context = await browser_pool.get_context()
+                    result = await scrape_testbook_page_with_screenshot_robust(context, url, topic)
+                    
+                    if result and result.get('is_relevant'):
+                        screenshot_data.append(result)
+                        relevant_mcqs += 1
+                        print(f"✅ Captured relevant screenshot {i + 1}/{len(links)} - Total: {len(screenshot_data)}")
+                    else:
+                        irrelevant_mcqs += 1
+                        print(f"⚠️ Skipped irrelevant screenshot {i + 1}/{len(links)}")
+                    
+                    await context.close()
+                    break  # Success, exit retry loop
+                    
+                except Exception as e:
+                    print(f"❌ Error capturing screenshot {i + 1} (attempt {attempt + 1}): {e}")
+                    if attempt == max_attempts - 1:
+                        irrelevant_mcqs += 1
+                    else:
+                        await asyncio.sleep(2)  # Wait before retry
+            
+            # Update progress
+            update_job_progress(job_id, "running", 
+                              f"✅ Processed {i + 1}/{len(links)} links - Captured {len(screenshot_data)} relevant screenshots", 
+                              processed_links=i + 1, mcqs_found=len(screenshot_data))
+            
+            # Delay to prevent overload
+            if i < len(links) - 1:
+                await asyncio.sleep(2)
+        
+        # Clean up browser pool
+        await browser_pool.close()
+        
+        if not screenshot_data:
+            update_job_progress(job_id, "completed", 
+                              f"❌ No relevant screenshots captured for '{topic}'. Please try another topic.", 
+                              total_links=len(links), processed_links=len(links), mcqs_found=0)
+            return
+        
+        # Generate image-based PDF
+        try:
+            final_message = f"✅ Screenshot capture complete! Captured {relevant_mcqs} relevant screenshots from {len(links)} total links."
+            update_job_progress(job_id, "running", final_message + " Generating PDF...", 
+                              total_links=len(links), processed_links=len(links), mcqs_found=len(screenshot_data))
+            
+            filename = generate_image_based_pdf(screenshot_data, topic, exam_type)
+            pdf_url = f"/api/download-pdf/{filename}"
+            
+            generated_pdfs[job_id] = {
+                "filename": filename,
+                "topic": topic,
+                "exam_type": exam_type,
+                "mcqs_count": len(screenshot_data),
+                "generated_at": datetime.now()
+            }
+            
+            success_message = f"🎉 SUCCESS! Generated image-based PDF with {len(screenshot_data)} relevant screenshots for topic '{topic}'."
+            update_job_progress(job_id, "completed", success_message, 
+                              total_links=len(links), processed_links=len(links), 
+                              mcqs_found=len(screenshot_data), pdf_url=pdf_url)
+            
+            print(f"✅ Screenshot job {job_id} completed successfully with {len(screenshot_data)} images")
+            
+        except Exception as e:
+            print(f"❌ Error generating image PDF: {e}")
+            update_job_progress(job_id, "error", f"❌ Error generating image PDF: {str(e)}")
+    
+    except Exception as e:
+        print(f"❌ Critical error in screenshot extraction: {e}")
+        update_job_progress(job_id, "error", f"❌ Critical error: {str(e)}")
+        await browser_pool.close()
 
 # API Routes
 @app.get("/api/health")
@@ -1761,7 +1767,7 @@ async def health_check():
 
 @app.post("/api/generate-mcq-pdf")
 async def generate_mcq_pdf(request: SearchRequest, background_tasks: BackgroundTasks):
-    """Generate MCQ PDF with topic-based filtering and progress tracking"""
+    """Generate MCQ PDF with robust error handling"""
     job_id = str(uuid.uuid4())
     
     # Validate inputs
@@ -1799,11 +1805,26 @@ async def generate_mcq_pdf(request: SearchRequest, background_tasks: BackgroundT
 
 @app.get("/api/job-status/{job_id}")
 async def get_job_status(job_id: str):
-    """Get job status and progress"""
-    if job_id not in job_progress:
-        raise HTTPException(status_code=404, detail="Job not found")
-    
-    return job_progress[job_id]
+    """Get job status with enhanced error handling"""
+    try:
+        if job_id not in job_progress:
+            raise HTTPException(status_code=404, detail="Job not found")
+        
+        status = job_progress[job_id]
+        print(f"📊 Returning status for job {job_id}: {status.get('status')} - {status.get('progress', '')[:100]}...")
+        return status
+        
+    except Exception as e:
+        print(f"❌ Error getting job status for {job_id}: {e}")
+        return {
+            "job_id": job_id,
+            "status": "error",
+            "progress": f"Error retrieving job status: {str(e)}",
+            "total_links": 0,
+            "processed_links": 0,
+            "mcqs_found": 0,
+            "pdf_url": None
+        }
 
 @app.get("/api/download-pdf/{filename}")
 async def download_pdf(filename: str):
@@ -1819,20 +1840,23 @@ async def download_pdf(filename: str):
         media_type='application/pdf'
     )
 
-# Startup event to initialize browser pool
+# Startup event
 @app.on_event("startup")
 async def startup_event():
     """Initialize services on startup"""
-    print("🚀 MCQ Scraper API starting up...")
+    print("🚀 Robust MCQ Scraper API starting up...")
     print(f"📊 Browser installation status: {browser_installation_state}")
 
-# Shutdown event to cleanup browser pool
+# Shutdown event
 @app.on_event("shutdown")
 async def shutdown_event():
-    """Cleanup on shutdown"""
-    print("🔄 MCQ Scraper API shutting down...")
-    await browser_pool.close()
-    print("✅ Browser pool closed successfully")
+    """Enhanced cleanup on shutdown"""
+    print("🔄 Robust MCQ Scraper API shutting down...")
+    try:
+        await browser_pool.close()
+        print("✅ Browser pool closed successfully")
+    except Exception as e:
+        print(f"⚠️ Error closing browser pool: {e}")
 
 if __name__ == "__main__":
     import uvicorn
