@@ -217,7 +217,7 @@ def run_setup_command(command: str, setup_id: str, step_name: str, timeout: int 
             capture_output=True,
             text=True,
             timeout=timeout,
-            cwd="/app/backend"
+            cwd="/app"
         )
         
         if result.returncode == 0:
@@ -277,7 +277,7 @@ def find_browser_path(installation_output: str) -> str:
         possible_paths = [
             '/tmp/pw-browsers',
             '/root/.cache/ms-playwright',
-            '/app/backend/pw-browsers',
+            '/app/pw-browsers',
             '/pw-browsers'
         ]
         
@@ -872,7 +872,7 @@ def generate_pdf(mcqs: List[MCQData], topic: str, job_id: str, relevant_mcqs: in
     """Generate a professionally formatted PDF with enhanced visual design and filtering statistics"""
     try:
         # Create PDFs directory if it doesn't exist
-        pdf_dir = Path("/app/backend/pdfs")
+        pdf_dir = Path("/app/pdfs")
         pdf_dir.mkdir(exist_ok=True)
         
         filename = f"Testbook_MCQs_{topic.replace(' ', '_')}_{job_id}.pdf"
@@ -1204,7 +1204,7 @@ def generate_image_based_pdf(screenshots_data: List[dict], topic: str, exam_type
         # Create filename
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         filename = f"mcq_screenshots_{topic}_{exam_type}_{timestamp}.pdf"
-        filepath = f"/app/backend/pdfs/{filename}"
+        filepath = f"/app/pdfs/{filename}"
         
         # Ensure directory exists
         os.makedirs(os.path.dirname(filepath), exist_ok=True)
@@ -1613,7 +1613,7 @@ async def get_job_status(job_id: str):
 @app.get("/api/download/{filename}")
 async def download_pdf(filename: str):
     """Download generated PDF"""
-    file_path = Path("/app/backend/pdfs") / filename
+    file_path = Path("/app/pdfs") / filename
     
     if not file_path.exists():
         raise HTTPException(status_code=404, detail="File not found")
