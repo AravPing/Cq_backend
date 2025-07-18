@@ -22,32 +22,13 @@ import uuid
 from datetime import datetime
 import re
 from pathlib import Path
-import subprocess
-import sys
 import logging
-import threading
 
 # Load environment variables
 load_dotenv()
 
-# Global setup state
-setup_state = {
-    "is_setup_complete": False,
-    "setup_in_progress": False,
-    "browser_path": None,
-    "setup_error": None
-}
-
-# Setup progress tracking
-setup_progress = {}
-
-# Dynamic Playwright browsers path - will be set during setup
-def get_playwright_browsers_path():
-    """Get the current Playwright browsers path"""
-    return setup_state.get("browser_path") or os.getenv('PLAYWRIGHT_BROWSERS_PATH', '/tmp/pw-browsers')
-
-# Set initial Playwright browsers path
-os.environ['PLAYWRIGHT_BROWSERS_PATH'] = get_playwright_browsers_path()
+# Set Playwright browsers path
+os.environ['PLAYWRIGHT_BROWSERS_PATH'] = '/tmp/pw-browsers'
 
 app = FastAPI()
 
@@ -128,25 +109,13 @@ class SearchRequest(BaseModel):
     exam_type: str = "SSC"  # SSC or BPSC
     pdf_format: str = "text"  # text or image
 
-class SetupStatus(BaseModel):
-    setup_id: str
-    status: str  # "running", "completed", "error"
-    progress: str
-    step: str = ""
-    error_message: str = ""
-
-class SetupResponse(BaseModel):
-    setup_id: str
-    status: str
-    message: str
-
 class MCQData(BaseModel):
     question: str
     options: List[str]
     answer: str
-    exam_source_heading: str = ""  # NEW: "This question was previously asked in"
-    exam_source_title: str = ""    # NEW: "SSC 2016 Combined Competitive Exam Official paper"
-    is_relevant: bool = True       # NEW: Indicates if MCQ passed relevance filter
+    exam_source_heading: str = ""  # "This question was previously asked in"
+    exam_source_title: str = ""    # "SSC 2016 Combined Competitive Exam Official paper"
+    is_relevant: bool = True       # Indicates if MCQ passed relevance filter
 
 class JobStatus(BaseModel):
     job_id: str
@@ -188,238 +157,6 @@ def update_job_progress(job_id: str, status: str, progress: str, **kwargs):
         **kwargs
     })
 
-def update_setup_progress(setup_id: str, status: str, progress: str, step: str = "", error_message: str = ""):
-    """Update setup progress in memory"""
-    if setup_id not in setup_progress:
-        setup_progress[setup_id] = {
-            "setup_id": setup_id,
-            "status": status,
-            "progress": progress,
-            "step": step,
-            "error_message": error_message
-        }
-    else:
-        setup_progress[setup_id].update({
-            "status": status,
-            "progress": progress,
-            "step": step,
-            "error_message": error_message
-        })
-
-def run_setup_command(command: str, setup_id: str, step_name: str, timeout: int = 600):
-    """Run a setup command with progress tracking"""
-    try:
-        update_setup_progress(setup_id, "running", f"Executing: {step_name}", step_name)
-        
-        result = subprocess.run(
-            command,
-            shell=True,
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-            cwd="/app"
-        )
-        
-        if result.returncode == 0:
-            update_setup_progress(setup_id, "running", f"✅ {step_name} completed", step_name)
-            return True, result.stdout, result.stderr
-        else:
-            error_msg = f"❌ {step_name} failed: {result.stderr}"
-            update_setup_progress(setup_id, "error", error_msg, step_name, result.stderr)
-            return False, result.stdout, result.stderr
-            
-    except subprocess.TimeoutExpired:
-        error_msg = f"❌ {step_name} timed out after {timeout} seconds"
-        update_setup_progress(setup_id, "error", error_msg, step_name, "Timeout")
-        return False, "", "Timeout"
-    except Exception as e:
-        error_msg = f"❌ {step_name} error: {str(e)}"
-        update_setup_progress(setup_id, "error", error_msg, step_name, str(e))
-        return False, "", str(e)
-
-def find_browser_path(installation_output: str) -> str:
-    """Extract browser path from installation output"""
-    try:
-        # Dynamic browser path detection - look for actual installed browsers
-        browser_base_path = "/tmp/pw-browsers"
-        
-        if not os.path.exists(browser_base_path):
-            print(f"Browser base path {browser_base_path} does not exist, creating...")
-            os.makedirs(browser_base_path, exist_ok=True)
-            return browser_base_path
-        
-        # Look for any chromium installation directory
-        chromium_dirs = []
-        for item in os.listdir(browser_base_path):
-            item_path = os.path.join(browser_base_path, item)
-            if os.path.isdir(item_path) and (item.startswith("chromium-") or item.startswith("chromium_headless_shell-")):
-                chromium_dirs.append(item_path)
-        
-        if chromium_dirs:
-            # Use the first chromium directory found
-            selected_path = chromium_dirs[0]
-            print(f"Found chromium installation at: {selected_path}")
-            return browser_base_path
-        
-        # Look for browser installation paths in the output
-        lines = installation_output.split('\n')
-        for line in lines:
-            if 'chromium' in line.lower() and ('installed' in line.lower() or 'downloaded' in line.lower()):
-                # Try to extract path from line
-                if '/tmp/pw-browsers' in line:
-                    # Extract the path
-                    import re
-                    match = re.search(r'/tmp/pw-browsers[^\s]*', line)
-                    if match:
-                        return browser_base_path
-        
-        # Fallback: check if standard paths exist
-        possible_paths = [
-            '/tmp/pw-browsers',
-            '/root/.cache/ms-playwright',
-            '/app/pw-browsers',
-            '/pw-browsers'
-        ]
-        
-        for path in possible_paths:
-            if os.path.exists(path):
-                return path
-        
-        # Default fallback
-        return browser_base_path
-        
-    except Exception as e:
-        print(f"Error finding browser path: {e}")
-        return '/tmp/pw-browsers'
-
-def install_playwright_dependencies(setup_id: str):
-    """Install Playwright and its dependencies"""
-    try:
-        # Step 1: Install system dependencies first
-        update_setup_progress(setup_id, "running", "Installing system dependencies...", "system_deps")
-        
-        # Install essential system dependencies
-        system_deps = [
-            "apt-get update",
-            "apt-get install -y curl wget gnupg lsb-release",
-            "apt-get install -y nodejs npm",
-            "apt-get install -y libnss3 libnspr4 libdbus-1-3 libatk1.0-0 libatk-bridge2.0-0 libcups2 libdrm2 libgtk-3-0 libgbm1 libasound2",
-            "apt-get install -y libxss1 libgconf-2-4 libxtst6 libxrandr2 libasound2 libpangocairo-1.0-0 libatk1.0-0 libcairo-gobject2 libgtk-3-0 libgdk-pixbuf2.0-0"
-        ]
-        
-        for dep_command in system_deps:
-            success, stdout, stderr = run_setup_command(dep_command, setup_id, f"System dependency: {dep_command.split()[2] if len(dep_command.split()) > 2 else dep_command}", 180)
-            if not success:
-                print(f"Warning: Failed to install {dep_command}, continuing...")
-        
-        # Step 2: Ensure proper browser path
-        browser_path = "/tmp/pw-browsers"
-        os.makedirs(browser_path, exist_ok=True)
-        os.environ['PLAYWRIGHT_BROWSERS_PATH'] = browser_path
-        
-        # Step 3: Install Playwright browsers with multiple approaches
-        update_setup_progress(setup_id, "running", "Installing Playwright browsers...", "playwright_browsers")
-        
-        # Try different installation methods
-        installation_commands = [
-            "npx playwright install --with-deps chromium",
-            "npx playwright install chromium",
-            "npx -y playwright install --with-deps chromium",
-            "npx -y playwright install chromium"
-        ]
-        
-        installation_success = False
-        for cmd in installation_commands:
-            update_setup_progress(setup_id, "running", f"Trying: {cmd}", "playwright_browsers")
-            success, stdout, stderr = run_setup_command(cmd, setup_id, f"Playwright installation: {cmd}", 600)
-            
-            if success:
-                installation_success = True
-                break
-            else:
-                print(f"Command failed: {cmd}, trying next...")
-        
-        if not installation_success:
-            setup_state["setup_error"] = "Failed to install Playwright browsers with all methods"
-            setup_state["setup_in_progress"] = False
-            return False, None
-        
-        # Step 4: Verify browser installation
-        update_setup_progress(setup_id, "running", "Verifying browser installation...", "verification")
-        
-        # Dynamic browser path detection
-        browser_path = find_browser_path(stdout + stderr)
-        
-        # Step 5: Update environment and global state
-        os.environ['PLAYWRIGHT_BROWSERS_PATH'] = browser_path
-        setup_state["browser_path"] = browser_path
-        setup_state["is_setup_complete"] = True
-        setup_state["setup_in_progress"] = False
-        
-        update_setup_progress(setup_id, "completed", f"✅ Setup completed! Browser path: {browser_path}", "completed")
-        return True, browser_path
-            
-    except Exception as e:
-        error_msg = f"Setup failed with error: {str(e)}"
-        setup_state["setup_error"] = error_msg
-        setup_state["setup_in_progress"] = False
-        update_setup_progress(setup_id, "error", error_msg, "error", str(e))
-        return False, None
-
-def setup_backend(setup_id: str):
-    """Run the complete backend setup in a separate thread"""
-    try:
-        setup_state["setup_in_progress"] = True
-        setup_state["setup_error"] = None
-        
-        success, browser_path = install_playwright_dependencies(setup_id)
-        
-        if success:
-            # Verify the installation works
-            update_setup_progress(setup_id, "running", "Verifying installation...", "verification")
-            
-            # Quick verification test
-            try:
-                import asyncio
-                from playwright.async_api import async_playwright
-                
-                async def test_browser():
-                    try:
-                        # Set the browser path environment variable
-                        os.environ['PLAYWRIGHT_BROWSERS_PATH'] = browser_path
-                        
-                        async with async_playwright() as p:
-                            browser = await p.chromium.launch(
-                                headless=True,
-                                # Let Playwright find the browser automatically
-                                executable_path=None
-                            )
-                            page = await browser.new_page()
-                            await page.goto('https://example.com', timeout=10000)
-                            title = await page.title()
-                            await browser.close()
-                            print(f"Verification successful: Page title is '{title}'")
-                            return True
-                    except Exception as e:
-                        print(f"Verification failed: {e}")
-                        return False
-                
-                # Run verification
-                result = asyncio.run(test_browser())
-                if result:
-                    update_setup_progress(setup_id, "completed", "✅ Backend setup completed successfully!", "completed")
-                else:
-                    update_setup_progress(setup_id, "error", "❌ Browser verification failed", "verification", "Browser test failed")
-                    
-            except Exception as e:
-                update_setup_progress(setup_id, "error", f"❌ Verification error: {str(e)}", "verification", str(e))
-                
-    except Exception as e:
-        error_msg = f"Backend setup failed: {str(e)}"
-        setup_state["setup_error"] = error_msg
-        setup_state["setup_in_progress"] = False
-        update_setup_progress(setup_id, "error", error_msg, "error", str(e))
-
 def clean_unwanted_text(text: str) -> str:
     """Remove unwanted text strings from scraped content"""
     unwanted_strings = [
@@ -427,9 +164,9 @@ def clean_unwanted_text(text: str) -> str:
         "Download PDF", 
         "Attempt Online",
         "View all BPSC Exam Papers >",
-        "View all SSC Exam Papers >",    # Updated for SSC
+        "View all SSC Exam Papers >",
         "View all BPSC Exam Papers",
-        "View all SSC Exam Papers"       # Updated for SSC
+        "View all SSC Exam Papers"
     ]
     
     cleaned_text = text
@@ -439,6 +176,7 @@ def clean_unwanted_text(text: str) -> str:
     # Remove extra whitespace and newlines
     cleaned_text = re.sub(r'\s+', ' ', cleaned_text).strip()
     return cleaned_text
+
 def clean_text_for_pdf(text: str) -> str:
     """Clean text for PDF generation by removing unwanted characters and formatting"""
     if not text:
@@ -459,6 +197,7 @@ def clean_text_for_pdf(text: str) -> str:
         cleaned = re.sub(pattern, '', cleaned, flags=re.IGNORECASE)
     
     return cleaned.strip()
+
 async def capture_page_screenshot(page, url: str, topic: str) -> Optional[bytes]:
     """Capture screenshot of complete MCQ content (question + options + solution)"""
     try:
@@ -764,21 +503,11 @@ async def scrape_mcq_content(url: str, search_topic: str) -> Optional[MCQData]:
     """
     try:
         async with async_playwright() as p:
-            # Set browser path environment variable
-            browser_path = get_playwright_browsers_path()
-            os.environ['PLAYWRIGHT_BROWSERS_PATH'] = browser_path
-            print(f"🔧 Setting PLAYWRIGHT_BROWSERS_PATH to: {browser_path}")
-            
-            browser = await p.chromium.launch(
-                headless=True,
-                executable_path=None  # Let Playwright find the browser using PLAYWRIGHT_BROWSERS_PATH
-            )
+            browser = await p.chromium.launch(headless=True)
             context = await browser.new_context(
                 user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
             )
             page = await context.new_page()
-            
-
             
             # Navigate to page
             await page.goto(url, wait_until='domcontentloaded', timeout=30000)
@@ -1356,7 +1085,7 @@ async def process_mcq_extraction(job_id: str, topic: str, exam_type: str = "SSC"
         print(f"❌ Error in process_mcq_extraction: {e}")
 
 async def process_text_extraction(job_id: str, topic: str, exam_type: str, links: List[str]):
-    """Process text-based MCQ extraction (existing functionality)"""
+    """Process text-based MCQ extraction"""
     # Extract MCQs with filtering
     mcqs = []
     relevant_mcqs = 0
@@ -1426,17 +1155,9 @@ async def process_screenshot_extraction(job_id: str, topic: str, exam_type: str,
     relevant_screenshots = 0
     irrelevant_screenshots = 0
     
-    # Initialize Playwright for screenshot capture with proper browser path
+    # Initialize Playwright for screenshot capture
     async with async_playwright() as p:
-        # Set browser path environment variable
-        browser_path = get_playwright_browsers_path()
-        os.environ['PLAYWRIGHT_BROWSERS_PATH'] = browser_path
-        print(f"🔧 Setting PLAYWRIGHT_BROWSERS_PATH to: {browser_path}")
-        
-        browser = await p.chromium.launch(
-            headless=True,
-            executable_path=None  # Let Playwright find the browser using PLAYWRIGHT_BROWSERS_PATH
-        )
+        browser = await p.chromium.launch(headless=True)
         page = await browser.new_page()
         
         for i, link in enumerate(links, 1):
@@ -1502,109 +1223,45 @@ async def process_screenshot_extraction(job_id: str, topic: str, exam_type: str,
                       mcqs_found=len(screenshots_data), pdf_url=pdf_url)
 
 # ============================================
-# SETUP API ENDPOINTS
+# MAIN API ENDPOINTS
 # ============================================
 
-@app.post("/api/setup", response_model=SetupResponse)
-async def start_setup():
-    """Start the backend setup process"""
-    global setup_state
-    
-    if setup_state["setup_in_progress"]:
-        return SetupResponse(
-            setup_id="",
-            status="running",
-            message="Setup is already in progress"
-        )
-    
-    # Generate setup ID
-    setup_id = str(uuid.uuid4())
-    
-    # Reset setup state
-    setup_state["is_setup_complete"] = False
-    setup_state["setup_error"] = None
-    setup_state["browser_path"] = None
-    
-    # Start setup in background thread
-    setup_thread = threading.Thread(target=setup_backend, args=(setup_id,))
-    setup_thread.daemon = True
-    setup_thread.start()
-    
-    return SetupResponse(
-        setup_id=setup_id,
-        status="started",
-        message="Backend setup started"
-    )
-
-@app.post("/api/setup/force-reset")
-async def force_reset_setup():
-    """Force reset the setup state and start fresh"""
-    global setup_state, setup_progress
-    
-    # Reset all setup state
-    setup_state["is_setup_complete"] = False
-    setup_state["setup_in_progress"] = False
-    setup_state["setup_error"] = None
-    setup_state["browser_path"] = None
-    
-    # Clear progress tracking
-    setup_progress.clear()
-    
-    return {"message": "Setup state reset successfully"}
-
-@app.get("/api/setup-status/{setup_id}", response_model=SetupStatus)
-async def get_setup_status(setup_id: str):
-    """Get setup progress status"""
-    if setup_id not in setup_progress:
-        raise HTTPException(status_code=404, detail="Setup ID not found")
-    
-    return SetupStatus(**setup_progress[setup_id])
-
-@app.get("/api/setup-status")
-async def get_general_setup_status():
-    """Get general setup status"""
-    return {
-        "is_setup_complete": setup_state["is_setup_complete"],
-        "setup_in_progress": setup_state["setup_in_progress"],
-        "setup_error": setup_state["setup_error"],
-        "browser_path": setup_state["browser_path"]
-    }
-
-# ============================================
-# EXISTING API ENDPOINTS
-# ============================================
-
-@app.post("/api/generate-mcq-pdf", response_model=JobStatus)
+@app.post("/api/generate-mcq-pdf")
 async def generate_mcq_pdf(request: SearchRequest, background_tasks: BackgroundTasks):
-    """Start SSC/BPSC-focused MCQ extraction with smart filtering and support for text/image PDFs"""
-    # Check if setup is complete
-    if not setup_state["is_setup_complete"]:
-        raise HTTPException(status_code=400, detail="Backend setup not complete. Please run setup first.")
-    
-    if not request.topic.strip():
-        raise HTTPException(status_code=400, detail="Topic cannot be empty")
-    
-    # Validate exam_type
-    if request.exam_type.upper() not in ["SSC", "BPSC"]:
-        raise HTTPException(status_code=400, detail="exam_type must be either 'SSC' or 'BPSC'")
-    
-    # Validate pdf_format
-    if request.pdf_format.lower() not in ["text", "image"]:
-        raise HTTPException(status_code=400, detail="pdf_format must be either 'text' or 'image'")
-    
+    """Generate MCQ PDF with enhanced filtering and format support"""
     job_id = str(uuid.uuid4())
     
-    # Initialize job progress
-    update_job_progress(job_id, "starting", f"🚀 Initializing {request.exam_type}-focused MCQ extraction with smart filtering...")
+    # Input validation
+    if not request.topic or not request.topic.strip():
+        raise HTTPException(status_code=400, detail="Topic is required")
     
-    # Start background task with new parameters
-    background_tasks.add_task(process_mcq_extraction, job_id, request.topic, request.exam_type, request.pdf_format)
+    if request.exam_type not in ["SSC", "BPSC"]:
+        raise HTTPException(status_code=400, detail="Exam type must be SSC or BPSC")
     
-    return JobStatus(**job_progress[job_id])
+    if request.pdf_format not in ["text", "image"]:
+        raise HTTPException(status_code=400, detail="PDF format must be text or image")
+    
+    # Start background task
+    background_tasks.add_task(
+        process_mcq_extraction, 
+        job_id, 
+        request.topic.strip(), 
+        request.exam_type, 
+        request.pdf_format
+    )
+    
+    return JobStatus(
+        job_id=job_id,
+        status="running",
+        progress=f"🔍 Starting {request.exam_type} MCQ extraction for '{request.topic}' ({request.pdf_format} format)...",
+        total_links=0,
+        processed_links=0,
+        mcqs_found=0
+    )
 
-@app.get("/api/job-status/{job_id}", response_model=JobStatus)
+@app.get("/api/job-status/{job_id}")
 async def get_job_status(job_id: str):
-    """Get the status of a job"""
+    """Get job status and progress"""
     if job_id not in job_progress:
         raise HTTPException(status_code=404, detail="Job not found")
     
@@ -1618,63 +1275,22 @@ async def download_pdf(filename: str):
     if not file_path.exists():
         raise HTTPException(status_code=404, detail="File not found")
     
+    if filename not in generated_pdfs:
+        raise HTTPException(status_code=404, detail="PDF not found in records")
+    
     return FileResponse(
         path=str(file_path),
         filename=filename,
-        media_type='application/pdf'
+        media_type="application/pdf"
     )
-
-@app.get("/api/test-search/{topic}")
-async def test_search(topic: str, exam_type: str = "SSC"):
-    """Test endpoint to verify enhanced SSC/BPSC search with filtering preview"""
-    try:
-        links = await search_google_custom(topic, exam_type)
-        
-        # Test filtering on first few links
-        filtering_preview = []
-        for i, link in enumerate(links[:3]):  # Test first 3 links
-            mcq_data = await scrape_mcq_content(link, topic)
-            filtering_preview.append({
-                "link": link,
-                "relevant": mcq_data is not None,
-                "has_question": bool(mcq_data.question if mcq_data else False),
-                "topic_in_question": topic.lower() in (mcq_data.question.lower() if mcq_data else "")
-            })
-        
-        return {
-            "topic": topic,
-            "exam_type": exam_type,
-            "search_focus": exam_type,
-            "links_found": len(links),
-            "links": links[:5],  # Return first 5 links for testing
-            "filtering_preview": filtering_preview,
-            "api_keys_remaining": api_key_manager.get_remaining_keys()
-        }
-    except Exception as e:
-        error_message = str(e)
-        if "All Servers are exhausted due to intense use" in error_message:
-            raise HTTPException(status_code=503, detail="All Servers are exhausted due to intense use")
-        else:
-            raise HTTPException(status_code=500, detail=f"Search failed: {error_message}")
 
 @app.get("/api/health")
 async def health_check():
-    """Health check endpoint with API key status"""
+    """Health check endpoint"""
     return {
-        "status": "healthy", 
-        "message": "Enhanced SSC/BPSC-Focused Testbook MCQ Scraper API is running",
-        "api_keys_remaining": api_key_manager.get_remaining_keys(),
-        "exam_focus": "SSC (Staff Selection Commission) & BPSC (Bihar Public Service Commission)",
-        "pdf_formats": ["text", "image"],
-        "features": [
-            "Automatic API Key Rotation",
-            "SSC & BPSC-Focused Search Queries",
-            "Smart Topic Relevance Filtering",
-            "Enhanced Scraping with Exam Source Info",
-            "Professional PDF Generation with Statistics",
-            "Screenshot-based Image PDF Generation",
-            "Content Cleaning"
-        ]
+        "status": "healthy",
+        "timestamp": datetime.now().isoformat(),
+        "service": "MCQ Scraper API"
     }
 
 if __name__ == "__main__":
