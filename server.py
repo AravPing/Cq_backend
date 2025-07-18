@@ -8,7 +8,7 @@ import requests
 import asyncio
 import json
 from playwright.async_api import async_playwright
-from playwright_stealth import stealth_async
+
 from reportlab.lib.pagesizes import letter, A4
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, PageBreak, Table, TableStyle
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
@@ -778,8 +778,7 @@ async def scrape_mcq_content(url: str, search_topic: str) -> Optional[MCQData]:
             )
             page = await context.new_page()
             
-            # Apply stealth
-            await stealth_async(page)
+
             
             # Navigate to page
             await page.goto(url, wait_until='domcontentloaded', timeout=30000)
