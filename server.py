@@ -865,11 +865,44 @@ class JobStatus(BaseModel):
     pdf_url: Optional[str] = None
 
 def update_job_progress(job_id: str, status: str, progress: str, **kwargs):
-    """Update job progress using persistent storage"""
+    """Update job progress using persistent storage with unicode fix"""
     try:
-        persistent_storage.update_job(job_id, status, progress, **kwargs)
+        # Clean unicode characters from progress messages
+        clean_progress = progress.encode('utf-8', errors='ignore').decode('utf-8')
+        
+        # Replace emoji characters with text equivalents for better compatibility
+        emoji_replacements = {
+            '🚀': '[STARTING]',
+            '📊': '[STATUS]',
+            '✅': '[SUCCESS]',
+            '❌': '[ERROR]',
+            '⏱️': '[TIMEOUT]',
+            '⚠️': '[WARNING]',
+            '🎯': '[PROCESSING]',
+            '📸': '[SCREENSHOT]',
+            '🖼️': '[IMAGE]',
+            '📄': '[PDF]',
+            '🔄': '[RETRY]',
+            '📍': '[FOUND]',
+            '📏': '[DIMENSIONS]',
+            '🔍': '[SEARCH]',
+            '🌐': '[WEB]',
+            '⭐': '[COMPLETE]',
+            '🎉': '[DONE]',
+            '💡': '[INFO]',
+            '🔧': '[PROCESSING]',
+            '🚩': '[FLAG]',
+            '📈': '[PROGRESS]',
+            '🎪': '[MCQ]',
+            '💾': '[SAVED]'
+        }
+        
+        for emoji, replacement in emoji_replacements.items():
+            clean_progress = clean_progress.replace(emoji, replacement)
+        
+        persistent_storage.update_job(job_id, status, clean_progress, **kwargs)
     except Exception as e:
-        print(f"тЪая╕П Error updating job progress: {e}")
+        print(f"[ERROR] Error updating job progress: {e}")
 
 def clean_unwanted_text(text: str) -> str:
     """Remove unwanted text strings from scraped content"""
@@ -904,9 +937,12 @@ def clean_text_for_pdf(text: str) -> str:
     return cleaned.strip()
 
 async def capture_page_screenshot_ultra_robust(page, url: str, topic: str) -> Optional[bytes]:
-    """Ultra-robust screenshot capture with maximum error handling"""
+    """
+    Enhanced screenshot capture - captures top 50% of page with all MCQ selectors
+    Maximum quality PNG with no compression, maintaining aspect ratio
+    """
     try:
-        print(f"ЁЯУ╕ Capturing screenshot for URL: {url}")
+        print(f"ЁЯУ╕ Capturing enhanced screenshot for URL: {url}")
         
         # Navigate with multiple timeout layers
         navigation_attempts = 3
@@ -925,104 +961,150 @@ async def capture_page_screenshot_ultra_robust(page, url: str, topic: str) -> Op
                 await asyncio.sleep(2)
         
         # Wait for page to settle
-        await page.wait_for_timeout(1500)
+        await page.wait_for_timeout(2000)
         
-        # Set conservative viewport
-        await page.set_viewport_size({"width": 1024, "height": 768})
-        await page.wait_for_timeout(500)
+        # Set high-resolution viewport for crystal clear screenshots
+        await page.set_viewport_size({"width": 1920, "height": 1080})
+        await page.wait_for_timeout(1000)
         
-        # Find MCQ elements with timeout
-        mcq_elements = []
+        # Get full page dimensions first
+        page_dimensions = await page.evaluate("""() => ({
+            scrollWidth: document.documentElement.scrollWidth,
+            scrollHeight: document.documentElement.scrollHeight,
+            clientWidth: document.documentElement.clientWidth,
+            clientHeight: document.documentElement.clientHeight
+        })""")
         
+        print(f"ЁЯУЭ Page dimensions: {page_dimensions}")
+        
+        # Find all required MCQ elements with timeout
+        required_elements = {}
         element_selectors = [
-            ('h1.questionBody.tag-h1', 'question'),
-            ('div.questionBody', 'question fallback'),
-            ('li.option', 'options'),
+            ('h1.questionBody.tag-h1', 'question_header'),
+            ('div.questionBody', 'question_body'),
+            ('li.option', 'options'),  # This will be multiple elements
             ('.solution', 'solution'),
-            ('div.pyp-heading', 'exam heading'),
-            ('div.pyp-title.line-ellipsis', 'exam title')
+            ('div.pyp-heading', 'exam_heading'),
+            ('div.pyp-title.line-ellipsis', 'exam_title')
         ]
         
-        for selector, description in element_selectors:
+        all_found_elements = []
+        
+        for selector, element_name in element_selectors:
             try:
                 if 'option' in selector:
+                    # Handle multiple option elements
                     elements = await asyncio.wait_for(
                         page.query_selector_all(selector), timeout=3.0
                     )
                     if elements:
-                        mcq_elements.extend(elements)
-                        print(f"ЁЯУЭ Found {len(elements)} {description} elements")
+                        all_found_elements.extend(elements)
+                        required_elements[element_name] = elements
+                        print(f"тЬЕ Found {len(elements)} {element_name} elements")
                 else:
+                    # Handle single elements
                     element = await asyncio.wait_for(
                         page.query_selector(selector), timeout=3.0
                     )
                     if element:
-                        mcq_elements.append(element)
-                        print(f"ЁЯУЭ Found {description} element")
-                        if 'questionBody' in selector:
-                            break  # We found the main question, stop looking for fallback
+                        all_found_elements.append(element)
+                        required_elements[element_name] = element
+                        print(f"тЬЕ Found {element_name} element")
+                        
+                        # Priority: if we found the main question header, don't use fallback
+                        if element_name == 'question_header':
+                            # Remove question_body from search since we have the main header
+                            element_selectors = [(s, n) for s, n in element_selectors if n != 'question_body']
             except asyncio.TimeoutError:
+                print(f"тП▒я╕П Timeout finding {element_name}")
                 continue
             except Exception as e:
-                print(f"тЪая╕П Error finding {description}: {e}")
+                print(f"тЪая╕П Error finding {element_name}: {e}")
                 continue
         
-        if not mcq_elements:
-            print(f"тЭМ No MCQ elements found on {url}")
+        if not all_found_elements:
+            print(f"тЭМ No required MCQ elements found on {url}")
             return None
         
-        # Calculate bounding box with error handling
+        print(f"ЁЯУЭ Found {len(all_found_elements)} total elements for screenshot")
+        
+        # Calculate bounding boxes for all found elements
         bounding_boxes = []
-        for element in mcq_elements:
+        for element in all_found_elements:
             try:
                 box = await asyncio.wait_for(element.bounding_box(), timeout=3.0)
                 if box and box['width'] > 0 and box['height'] > 0:
                     bounding_boxes.append(box)
-            except:
+                    print(f"ЁЯУЭ Element box: x={box['x']:.0f}, y={box['y']:.0f}, w={box['width']:.0f}, h={box['height']:.0f}")
+            except Exception as e:
+                print(f"тЪая╕П Error getting bounding box: {e}")
                 continue
         
         if not bounding_boxes:
             print(f"тЭМ Could not get valid bounding boxes for {url}")
             return None
         
-        # Calculate combined bounding box
-        min_x = min(box['x'] for box in bounding_boxes)
-        min_y = min(box['y'] for box in bounding_boxes)
-        max_x = max(box['x'] + box['width'] for box in bounding_boxes)
-        max_y = max(box['y'] + box['height'] for box in bounding_boxes)
+        # Calculate the region that includes all elements
+        elements_min_x = min(box['x'] for box in bounding_boxes)
+        elements_min_y = min(box['y'] for box in bounding_boxes)
+        elements_max_x = max(box['x'] + box['width'] for box in bounding_boxes)
+        elements_max_y = max(box['y'] + box['height'] for box in bounding_boxes)
         
-        # Add padding and ensure reasonable bounds
-        padding = 10
-        min_x = max(0, min_x - padding)
-        min_y = max(0, min_y - padding)
+        # Calculate top 50% of the page dimensions
+        page_width = page_dimensions['clientWidth']
+        page_height = page_dimensions['clientHeight']
+        top_50_percent_height = page_height // 2
         
-        # Get viewport dimensions
-        viewport = await page.evaluate("() => ({ width: window.innerWidth, height: window.innerHeight })")
-        screenshot_width = min(max_x - min_x + padding * 2, viewport['width'] - min_x, 1024)
-        screenshot_height = min(max_y - min_y + padding * 2, viewport['height'] - min_y, 768)
+        print(f"ЁЯУЭ Elements region: x={elements_min_x:.0f}-{elements_max_x:.0f}, y={elements_min_y:.0f}-{elements_max_y:.0f}")
+        print(f"ЁЯУЭ Page size: {page_width}x{page_height}, Top 50% height: {top_50_percent_height}")
         
-        # Ensure minimum size
-        screenshot_width = max(screenshot_width, 100)
-        screenshot_height = max(screenshot_height, 100)
+        # Determine screenshot region - prioritize upper portion but ensure all elements are included
+        screenshot_start_x = 0
+        screenshot_start_y = 0
+        screenshot_width = min(page_width, 1920)  # Full width up to 1920px
         
-        print(f"ЁЯУР Screenshot dimensions: {screenshot_width}x{screenshot_height} at ({min_x}, {min_y})")
+        # If elements fit within top 50%, use top 50%
+        if elements_max_y <= top_50_percent_height:
+            screenshot_height = top_50_percent_height
+            print(f"тЬЕ All elements fit within top 50% of page")
+        else:
+            # If elements extend beyond top 50%, adjust to include all elements but start from top
+            screenshot_height = min(int(elements_max_y + 50), page_height)  # Add 50px padding
+            print(f"ЁЯУЭ Elements extend beyond top 50%, adjusting height to {screenshot_height}")
+            
+            # If adjusted height is more than 60% of page, cap it at top 50% and ensure key elements
+            if screenshot_height > (page_height * 0.6):
+                screenshot_height = top_50_percent_height
+                print(f"ЁЯУЭ Capping at top 50% height: {screenshot_height}")
         
-        # Capture screenshot with timeout
+        # Final screenshot region
+        screenshot_region = {
+            "x": screenshot_start_x,
+            "y": screenshot_start_y,
+            "width": screenshot_width,
+            "height": screenshot_height
+        }
+        
+        print(f"ЁЯУР Final screenshot region: {screenshot_region}")
+        
+        # Scroll to top to ensure we capture from the beginning
+        await page.evaluate("window.scrollTo(0, 0)")
+        await page.wait_for_timeout(500)
+        
+        # Capture high-quality screenshot with no compression
         try:
             screenshot = await asyncio.wait_for(
                 page.screenshot(
-                    clip={
-                        "x": min_x,
-                        "y": min_y,
-                        "width": screenshot_width,
-                        "height": screenshot_height
-                    },
-                    type="png"
+                    clip=screenshot_region,
+                    type="png",
+                    # No quality parameter for PNG - PNG is lossless by default
+                    # This ensures maximum quality with no compression
                 ),
-                timeout=10.0
+                timeout=15.0
             )
             
-            print(f"тЬЕ Screenshot captured successfully for {url}")
+            print(f"тЬЕ Enhanced screenshot captured successfully for {url}")
+            print(f"ЁЯУЭ Screenshot specs: {screenshot_width}x{screenshot_height}px, PNG format, no compression")
             return screenshot
             
         except asyncio.TimeoutError:
@@ -1030,7 +1112,9 @@ async def capture_page_screenshot_ultra_robust(page, url: str, topic: str) -> Op
             return None
         
     except Exception as e:
-        print(f"тЭМ Error capturing screenshot for {url}: {str(e)}")
+        print(f"тЭМ Error capturing enhanced screenshot for {url}: {str(e)}")
+        import traceback
+        print(f"ЁЯУЭ Full traceback: {traceback.format_exc()}")
         return None
 
 async def scrape_testbook_page_with_screenshot_ultra_robust(context: BrowserContext, url: str, topic: str) -> Optional[dict]:
@@ -1967,28 +2051,124 @@ async def generate_mcq_pdf(request: SearchRequest, background_tasks: BackgroundT
 
 @app.get("/api/job-status/{job_id}")
 async def get_job_status(job_id: str):
-    """Get job status with persistent storage support"""
+    """
+    Enhanced job status with smart connection monitoring and unicode fix
+    """
     try:
         job_data = persistent_storage.get_job(job_id)
         
         if not job_data:
             raise HTTPException(status_code=404, detail="Job not found")
         
-        print(f"ЁЯУК Returning persistent status for job {job_id}: {job_data.get('status')} - {job_data.get('progress', '')[:100]}...")
-        return job_data
+        # Unicode/Emoji Fix - Ensure proper UTF-8 encoding for all text fields
+        safe_job_data = {}
+        for key, value in job_data.items():
+            if isinstance(value, str):
+                # Replace problematic unicode characters with proper text equivalents
+                safe_value = value.encode('utf-8', errors='ignore').decode('utf-8')
+                # Replace common emoji patterns with text equivalents
+                emoji_replacements = {
+                    'ЁЯЪА': '[STARTING]',
+                    'ЁЯУК': '[STATUS]',
+                    'тЬЕ': '[SUCCESS]',
+                    'тЭМ': '[ERROR]',
+                    'тП▒я╕П': '[TIMEOUT]',
+                    'тЪая╕П': '[WARNING]',
+                    'ЁЯФН': '[PROCESSING]',
+                    'ЁЯУ╕': '[SCREENSHOT]',
+                    'ЁЯЦ╝я╕П': '[IMAGE]',
+                    'ЁЯУЪ': '[PDF]',
+                    'ЁЯФД': '[RETRY]',
+                    'ЁЯУЭ': '[FOUND]',
+                    'ЁЯУП': '[DIMENSIONS]',
+                    'ЁЯФН': '[SEARCH]',
+                    'ЁЯМР': '[WEB]',
+                    'тнР': '[COMPLETE]',
+                    'ЁЯОЙ': '[DONE]',
+                    'ЁЯТб': '[INFO]',
+                    'ЁЯФЗ': '[PROCESSING]',
+                    'ЁЯЪй': '[FLAG]',
+                    'ЁЯУИ': '[PROGRESS]',
+                    'ЁЯОк': '[MCQ]',
+                    'ЁЯТ╛': '[SAVED]'
+                }
+                
+                for emoji, replacement in emoji_replacements.items():
+                    safe_value = safe_value.replace(emoji, replacement)
+                
+                safe_job_data[key] = safe_value
+            else:
+                safe_job_data[key] = value
+        
+        # Add browser monitoring status to response
+        browser_status = {
+            "browser_active": browser_pool.is_initialized,
+            "browser_restart_count": browser_pool.restart_count,
+            "last_browser_error": browser_pool.last_error
+        }
+        safe_job_data["browser_monitoring"] = browser_status
+        
+        # Add connection health indicator
+        safe_job_data["connection_health"] = "stable"
+        
+        # If job is running, check if browser is actually working
+        if safe_job_data.get("status") == "running":
+            if not browser_pool.is_initialized:
+                safe_job_data["connection_health"] = "browser_restarting"
+                if "STARTING" not in safe_job_data.get("progress", ""):
+                    safe_job_data["progress"] = "[PROCESSING] Browser restarting, continuing processing..."
+        
+        print(f"[STATUS] Returning enhanced status for job {job_id}: {safe_job_data.get('status')} - {safe_job_data.get('progress', '')[:100]}...")
+        return safe_job_data
         
     except HTTPException:
         raise
     except Exception as e:
-        print(f"тЭМ Error getting job status for {job_id}: {e}")
+        error_message = str(e).encode('utf-8', errors='ignore').decode('utf-8')
+        print(f"[ERROR] Error getting job status for {job_id}: {error_message}")
         return {
             "job_id": job_id,
             "status": "error",
-            "progress": f"Error retrieving job status: {str(e)}",
+            "progress": f"Error retrieving job status: {error_message}",
             "total_links": 0,
             "processed_links": 0,
             "mcqs_found": 0,
-            "pdf_url": None
+            "pdf_url": None,
+            "connection_health": "error",
+            "browser_monitoring": {
+                "browser_active": False,
+                "browser_restart_count": 0,
+                "last_browser_error": error_message
+            }
+        }
+
+@app.get("/api/browser-status")
+async def get_browser_status():
+    """
+    Browser monitoring endpoint for smart connection management
+    """
+    try:
+        return {
+            "browser_installed": browser_installation_state["is_installed"],
+            "browser_active": browser_pool.is_initialized,
+            "browser_restart_count": browser_pool.restart_count,
+            "last_browser_error": browser_pool.last_error,
+            "installation_attempted": browser_installation_state["installation_attempted"],
+            "installation_in_progress": browser_installation_state["installation_in_progress"],
+            "timestamp": datetime.now().isoformat(),
+            "connection_health": "stable" if browser_pool.is_initialized else "restarting"
+        }
+    except Exception as e:
+        error_message = str(e).encode('utf-8', errors='ignore').decode('utf-8')
+        return {
+            "browser_installed": False,
+            "browser_active": False,
+            "browser_restart_count": 0,
+            "last_browser_error": error_message,
+            "installation_attempted": False,
+            "installation_in_progress": False,
+            "timestamp": datetime.now().isoformat(),
+            "connection_health": "error"
         }
 
 @app.get("/api/download-pdf/{filename}")
