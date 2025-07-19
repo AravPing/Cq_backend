@@ -65,12 +65,12 @@ class PersistentJobStorage:
             if os.path.exists(self.storage_file):
                 with open(self.storage_file, 'rb') as f:
                     self.jobs = pickle.load(f)
-                print(f"ЁЯУВ Loaded {len(self.jobs)} jobs from persistent storage")
+                print(f"[STORAGE] Loaded {len(self.jobs)} jobs from persistent storage")
             else:
                 self.jobs = {}
-                print("ЁЯУВ No persistent storage found, starting fresh")
+                print("[STORAGE] No persistent storage found, starting fresh")
         except Exception as e:
-            print(f"тЪая╕П Error loading jobs from storage: {e}")
+            print(f"[ERROR] Error loading jobs from storage: {e}")
             self.jobs = {}
     
     def save_jobs(self):
@@ -79,7 +79,7 @@ class PersistentJobStorage:
             with open(self.storage_file, 'wb') as f:
                 pickle.dump(self.jobs, f)
         except Exception as e:
-            print(f"тЪая╕П Error saving jobs to storage: {e}")
+            print(f"[ERROR] Error saving jobs to storage: {e}")
     
     def update_job(self, job_id: str, status: str, progress: str, **kwargs):
         """Update job progress with automatic persistence"""
@@ -107,10 +107,10 @@ class PersistentJobStorage:
             # Auto-save after each update
             self.save_jobs()
             
-            print(f"ЁЯУК Job {job_id}: {status} - {progress}")
+            print(f"[JOB] Job {job_id}: {status} - {progress}")
             
         except Exception as e:
-            print(f"тЪая╕П Error updating job progress: {e}")
+            print(f"[ERROR] Error updating job progress: {e}")
     
     def get_job(self, job_id: str) -> Optional[dict]:
         """Get job status"""
@@ -135,10 +135,10 @@ class PersistentJobStorage:
             
             if jobs_to_remove:
                 self.save_jobs()
-                print(f"ЁЯз╣ Cleaned up {len(jobs_to_remove)} old jobs")
+                print(f"[CLEANUP] Cleaned up {len(jobs_to_remove)} old jobs")
                 
         except Exception as e:
-            print(f"тЪая╕П Error cleaning up old jobs: {e}")
+            print(f"[ERROR] Error cleaning up old jobs: {e}")
 
 # Global persistent job storage
 persistent_storage = PersistentJobStorage()
@@ -172,18 +172,18 @@ class UltraRobustBrowserPoolManager:
                 except:
                     pass
                 
-                print("тЪая╕П Browser connection lost, reinitializing...")
+                print("[BROWSER] Browser connection lost, reinitializing...")
                 await self._cleanup()
                 self.is_initialized = False
             
             if self.is_initialized:
                 return
             
-            print("ЁЯЪА Initializing Ultra-Robust Browser Pool Manager...")
+            print("[BROWSER] Initializing Ultra-Robust Browser Pool Manager...")
             
             # Check browser installation
             if not browser_installation_state["is_installed"]:
-                print("тЪая╕П Browsers not installed, attempting installation...")
+                print("[ERROR] Browsers not installed, attempting installation...")
                 await self._install_browsers()
             
             max_init_attempts = 3
@@ -258,17 +258,17 @@ class UltraRobustBrowserPoolManager:
                     self.retry_count = 0
                     self.restart_count += 1
                     
-                    print(f"тЬЕ Ultra-Robust Browser Pool Manager initialized successfully! (Restart #{self.restart_count})")
+                    print(f"[SUCCESS] Ultra-Robust Browser Pool Manager initialized successfully! (Restart #{self.restart_count})")
                     return
                     
                 except Exception as e:
-                    print(f"тЭМ Browser initialization attempt {attempt + 1} failed: {e}")
+                    print(f"[ERROR] Browser initialization attempt {attempt + 1} failed: {e}")
                     self.last_error = str(e)
                     await self._cleanup()
                     
                     if attempt < max_init_attempts - 1:
                         wait_time = (2 ** attempt) * 2
-                        print(f"тП│ Waiting {wait_time}s before retry...")
+                        print(f"[WAIT] Waiting {wait_time}s before retry...")
                         await asyncio.sleep(wait_time)
                     else:
                         raise Exception(f"Failed to initialize browser after {max_init_attempts} attempts")
@@ -285,12 +285,12 @@ class UltraRobustBrowserPoolManager:
             
             if result.returncode == 0:
                 browser_installation_state["is_installed"] = True
-                print("тЬЕ Browser installation successful")
+                print("[SUCCESS] Browser installation successful")
             else:
                 raise Exception(f"Browser installation failed: {result.stderr}")
                 
         except Exception as e:
-            print(f"тЭМ Browser installation error: {e}")
+            print(f"[ERROR] Browser installation error: {e}")
             raise
     
     async def get_context(self) -> BrowserContext:
@@ -315,33 +315,33 @@ class UltraRobustBrowserPoolManager:
                     timeout=20.0
                 )
                 
-                print(f"тЬЕ Browser context created successfully (attempt {attempt + 1})")
+                print(f"[SUCCESS] Browser context created successfully (attempt {attempt + 1})")
                 return context
                 
             except asyncio.TimeoutError:
-                print(f"тП▒я╕П Context creation timeout (attempt {attempt + 1})")
+                print(f"[TIMEOUT] Context creation timeout (attempt {attempt + 1})")
                 await self._handle_browser_failure()
                 
             except Exception as e:
-                print(f"тЪая╕П Error creating context (attempt {attempt + 1}): {e}")
+                print(f"[ERROR] Error creating context (attempt {attempt + 1}): {e}")
                 await self._handle_browser_failure()
                 
                 if attempt == max_attempts - 1:
                     # Last attempt - try to continue with degraded functionality
-                    print("ЁЯФД Maximum attempts reached, trying emergency recovery...")
+                    print("[EMERGENCY] Maximum attempts reached, trying emergency recovery...")
                     await self._emergency_recovery()
                     return await self.get_context()  # One final attempt
             
             # Progressive backoff
             wait_time = min((2 ** attempt) + 1, 10)
-            print(f"тП│ Waiting {wait_time}s before retry...")
+            print(f"[WAIT] Waiting {wait_time}s before retry...")
             await asyncio.sleep(wait_time)
         
         raise Exception("Failed to create browser context after all attempts")
     
     async def _handle_browser_failure(self):
         """Handle browser failures with memory cleanup"""
-        print("ЁЯФз Handling browser failure with memory cleanup...")
+        print("[RECOVERY] Handling browser failure with memory cleanup...")
         await self._cleanup()
         self.retry_count += 1
         
@@ -351,12 +351,12 @@ class UltraRobustBrowserPoolManager:
         
         # If too many failures, wait longer
         if self.retry_count > 3:
-            print(f"тЪая╕П Multiple browser failures ({self.retry_count}), waiting extra time...")
+            print(f"[ERROR] Multiple browser failures ({self.retry_count}), waiting extra time...")
             await asyncio.sleep(10)
     
     async def _emergency_recovery(self):
         """Emergency recovery procedure"""
-        print("ЁЯЪи Emergency recovery procedure initiated...")
+        print("[EMERGENCY] Emergency recovery procedure initiated...")
         
         # Force cleanup everything
         await self._cleanup()
@@ -365,14 +365,14 @@ class UltraRobustBrowserPoolManager:
         try:
             subprocess.run(["pkill", "-f", "chromium"], capture_output=True)
             subprocess.run(["pkill", "-f", "chrome"], capture_output=True)
-            print("ЁЯФД Killed remaining browser processes")
+            print("[CLEANUP] Killed remaining browser processes")
         except:
             pass
         
         # Clear temporary files
         try:
             subprocess.run(["rm", "-rf", "/tmp/playwright_*"], shell=True, capture_output=True)
-            print("ЁЯз╣ Cleared temporary files")
+            print("[CLEANUP] Cleared temporary files")
         except:
             pass
         
@@ -405,9 +405,9 @@ class UltraRobustBrowserPoolManager:
                 )
                 
         except asyncio.TimeoutError:
-            print("тП▒я╕П Cleanup timeout, forcing termination")
+            print("[TIMEOUT] Cleanup timeout, forcing termination")
         except Exception as e:
-            print(f"тЪая╕П Error during cleanup: {e}")
+            print(f"[ERROR] Error during cleanup: {e}")
         finally:
             self.browser = None
             self.playwright_instance = None
@@ -431,16 +431,16 @@ class UltraRobustBrowserPoolManager:
     
     async def close(self):
         """Close browser pool with enhanced cleanup"""
-        print("ЁЯФД Closing Ultra-Robust Browser Pool Manager...")
+        print("[SHUTDOWN] Closing Ultra-Robust Browser Pool Manager...")
         await self._cleanup()
-        print("тЬЕ Ultra-Robust Browser Pool Manager closed")
+        print("[SUCCESS] Ultra-Robust Browser Pool Manager closed")
 
 # Global ultra-robust browser pool
 browser_pool = UltraRobustBrowserPoolManager()
 
 def force_install_browsers():
     """Force install browsers with cloud deployment friendly approach"""
-    print("ЁЯФД Starting cloud-compatible browser installation...")
+    print("[INSTALL] Starting cloud-compatible browser installation...")
     
     try:
         # Ensure directory exists
@@ -452,7 +452,7 @@ def force_install_browsers():
         env['PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD'] = '0'
         
         # Install system dependencies first
-        print("ЁЯУж Installing system dependencies...")
+        print("[INSTALL] Installing system dependencies...")
         system_deps = [
             "apt-get update -y",
             "apt-get install -y curl wget gnupg lsb-release",
@@ -464,9 +464,9 @@ def force_install_browsers():
         for dep_cmd in system_deps:
             try:
                 subprocess.run(dep_cmd, shell=True, capture_output=True, text=True, timeout=120, env=env)
-                print(f"   тЬЕ {dep_cmd.split()[2] if len(dep_cmd.split()) > 2 else dep_cmd}")
+                print(f"   [SUCCESS] {dep_cmd.split()[2] if len(dep_cmd.split()) > 2 else dep_cmd}")
             except:
-                print(f"   тЪая╕П Failed: {dep_cmd}")
+                print(f"   [ERROR] Failed: {dep_cmd}")
         
         # Simplified installation approaches
         install_commands = [
@@ -480,7 +480,7 @@ def force_install_browsers():
         
         for cmd in install_commands:
             try:
-                print(f"ЁЯФД Trying: {cmd}")
+                print(f"[INSTALL] Trying: {cmd}")
                 result = subprocess.run(
                     cmd,
                     shell=True,
@@ -491,29 +491,29 @@ def force_install_browsers():
                 )
                 
                 if result.returncode == 0:
-                    print(f"тЬЕ SUCCESS with: {cmd}")
+                    print(f"[SUCCESS] SUCCESS with: {cmd}")
                     print(f"   Output: {result.stdout[:200]}...")
                     
                     if verify_browser_installation():
-                        print("тЬЕ Browser installation verified!")
+                        print("[SUCCESS] Browser installation verified!")
                         return True
                     else:
-                        print("тЪая╕П Installation completed but verification failed")
+                        print("[ERROR] Installation completed but verification failed")
                         continue
                 else:
-                    print(f"тЭМ FAILED: {cmd}")
+                    print(f"[ERROR] FAILED: {cmd}")
                     print(f"   Error: {result.stderr[:200]}...")
                     
             except subprocess.TimeoutExpired:
-                print(f"тП▒я╕П TIMEOUT: {cmd}")
+                print(f"[TIMEOUT] TIMEOUT: {cmd}")
             except Exception as e:
-                print(f"ЁЯТе ERROR: {cmd} - {str(e)}")
+                print(f"[ERROR] ERROR: {cmd} - {str(e)}")
         
-        print("тЭМ All installation methods failed")
+        print("[ERROR] All installation methods failed")
         return False
         
     except Exception as e:
-        print(f"ЁЯТе Critical error in browser installation: {e}")
+        print(f"[ERROR] Critical error in browser installation: {e}")
         return False
 
 def verify_browser_installation():
@@ -522,7 +522,7 @@ def verify_browser_installation():
         browser_path = "/tmp/pw-browsers"
         
         if not os.path.exists(browser_path):
-            print("тЭМ Browser directory doesn't exist")
+            print("[ERROR] Browser directory doesn't exist")
             return False
         
         # Check for browser directories
@@ -533,7 +533,7 @@ def verify_browser_installation():
             item_path = os.path.join(browser_path, item)
             if os.path.isdir(item_path) and ("chromium" in item.lower() or "chrome" in item.lower()):
                 browser_found = True
-                print(f"тЬЕ Found browser directory: {item}")
+                print(f"[SUCCESS] Found browser directory: {item}")
                 
                 # Check for executables
                 possible_executables = [
@@ -549,39 +549,39 @@ def verify_browser_installation():
                 for executable in possible_executables:
                     if os.path.exists(executable):
                         executable_found = True
-                        print(f"тЬЕ Found executable: {executable}")
+                        print(f"[SUCCESS] Found executable: {executable}")
                         if os.access(executable, os.X_OK):
-                            print(f"тЬЕ Executable is runnable: {executable}")
+                            print(f"[SUCCESS] Executable is runnable: {executable}")
                             return True
                         else:
-                            print(f"тЪая╕П Executable not runnable: {executable}")
+                            print(f"[ERROR] Executable not runnable: {executable}")
         
         if browser_found and not executable_found:
-            print("тЪая╕П Browser directory found but no executables")
+            print("[ERROR] Browser directory found but no executables")
         elif not browser_found:
-            print("тЭМ No browser directories found")
+            print("[ERROR] No browser directories found")
         
         return False
         
     except Exception as e:
-        print(f"тЭМ Error verifying browser installation: {e}")
+        print(f"[ERROR] Error verifying browser installation: {e}")
         return False
 
 def install_browsers_blocking():
     """Install browsers in blocking mode during startup"""
     global browser_installation_state
     
-    print("ЁЯЪА Starting browser installation check...")
+    print("[INSTALL] Starting browser installation check...")
     
     if verify_browser_installation():
         browser_installation_state["is_installed"] = True
-        print("тЬЕ Browsers already installed and verified!")
+        print("[SUCCESS] Browsers already installed and verified!")
         return True
     
     browser_installation_state["installation_in_progress"] = True
     browser_installation_state["installation_attempted"] = True
     
-    print("ЁЯФД Browsers not found. Starting installation...")
+    print("[INSTALL] Browsers not found. Starting installation...")
     
     try:
         success = install_with_python_module()
@@ -589,7 +589,7 @@ def install_browsers_blocking():
         if success:
             browser_installation_state["installation_in_progress"] = False
             browser_installation_state["is_installed"] = True
-            print("ЁЯОЙ Browser installation completed successfully!")
+            print("[SUCCESS] Browser installation completed successfully!")
             return True
         
         success = force_install_browsers()
@@ -597,7 +597,7 @@ def install_browsers_blocking():
         if success:
             browser_installation_state["installation_in_progress"] = False
             browser_installation_state["is_installed"] = True
-            print("ЁЯОЙ Browser installation completed successfully!")
+            print("[SUCCESS] Browser installation completed successfully!")
             return True
         
         success = install_with_script()
@@ -605,17 +605,17 @@ def install_browsers_blocking():
         if success:
             browser_installation_state["installation_in_progress"] = False
             browser_installation_state["is_installed"] = True
-            print("ЁЯОЙ Browser installation completed successfully!")
+            print("[SUCCESS] Browser installation completed successfully!")
             return True
         
     except Exception as e:
-        print(f"ЁЯТе Error during installation strategies: {e}")
+        print(f"[ERROR] Error during installation strategies: {e}")
     
     error_msg = "Failed to install Playwright browsers after trying all strategies"
     browser_installation_state["installation_in_progress"] = False
     browser_installation_state["is_installed"] = False
     browser_installation_state["installation_error"] = error_msg
-    print(f"тЭМ {error_msg}")
+    print(f"[ERROR] {error_msg}")
     return False
 
 def install_with_python_module():
@@ -634,7 +634,7 @@ def install_with_python_module():
         
         for cmd in commands:
             try:
-                print(f"ЁЯФД Trying: {cmd}")
+                print(f"[INSTALL] Trying: {cmd}")
                 result = subprocess.run(
                     cmd,
                     shell=True,
@@ -645,20 +645,20 @@ def install_with_python_module():
                 )
                 
                 if result.returncode == 0:
-                    print(f"тЬЕ SUCCESS with: {cmd}")
+                    print(f"[SUCCESS] SUCCESS with: {cmd}")
                     if verify_browser_installation():
                         return True
                 else:
-                    print(f"тЭМ FAILED: {cmd}")
+                    print(f"[ERROR] FAILED: {cmd}")
                     print(f"   Error: {result.stderr[:200]}...")
                     
             except Exception as e:
-                print(f"ЁЯТе ERROR: {cmd} - {str(e)}")
+                print(f"[ERROR] ERROR: {cmd} - {str(e)}")
         
         return False
         
     except Exception as e:
-        print(f"ЁЯТе Critical error in python module installation: {e}")
+        print(f"[ERROR] Critical error in python module installation: {e}")
         return False
 
 def install_with_script():
@@ -672,14 +672,14 @@ def install_with_script():
         )
         
         if result.returncode == 0:
-            print("тЬЕ Installation script completed successfully")
+            print("[SUCCESS] Installation script completed successfully")
             return verify_browser_installation()
         else:
-            print(f"тЭМ Installation script failed: {result.stderr}")
+            print(f"[ERROR] Installation script failed: {result.stderr}")
             return False
             
     except Exception as e:
-        print(f"ЁЯТе Error running installation script: {e}")
+        print(f"[ERROR] Error running installation script: {e}")
         return False
 
 # Install browsers during startup
@@ -690,26 +690,26 @@ print("=" * 60)
 try:
     install_success = install_browsers_blocking()
 except Exception as e:
-    print(f"ЁЯЪи CRITICAL ERROR during browser installation: {e}")
+    print(f"[CRITICAL] CRITICAL ERROR during browser installation: {e}")
     install_success = False
 
 if not install_success:
-    print("ЁЯЪи CRITICAL: Browser installation failed!")
-    print("ЁЯЪи App will start but scraping functionality may be limited")
+    print("[CRITICAL] CRITICAL: Browser installation failed!")
+    print("[CRITICAL] App will start but scraping functionality may be limited")
     browser_installation_state["is_installed"] = False
     browser_installation_state["installation_error"] = "Browser installation failed during startup"
 else:
-    print("тЬЕ Browser installation successful - Ultra-Robust App ready!")
+    print("[SUCCESS] Browser installation successful - Ultra-Robust App ready!")
 
 print("=" * 60)
 
 # Graceful shutdown handling
 def handle_shutdown(signum, frame):
     """Handle graceful shutdown"""
-    print("ЁЯФД Received shutdown signal, cleaning up...")
+    print("[SHUTDOWN] Received shutdown signal, cleaning up...")
     asyncio.create_task(browser_pool.close())
     persistent_storage.save_jobs()
-    print("тЬЕ Cleanup completed")
+    print("[SUCCESS] Cleanup completed")
 
 signal.signal(signal.SIGTERM, handle_shutdown)
 signal.signal(signal.SIGINT, handle_shutdown)
@@ -737,7 +737,7 @@ class APIKeyManager:
         if not self.api_keys:
             raise ValueError("No API keys found in environment")
         
-        print(f"ЁЯФС Initialized API Key Manager with {len(self.api_keys)} keys")
+        print(f"[API] Initialized API Key Manager with {len(self.api_keys)} keys")
     
     def get_current_key(self) -> str:
         return self.api_keys[self.current_key_index]
@@ -745,16 +745,16 @@ class APIKeyManager:
     def rotate_key(self) -> Optional[str]:
         current_key = self.api_keys[self.current_key_index]
         self.exhausted_keys.add(current_key)
-        print(f"тЪая╕П Key exhausted: {current_key[:20]}...")
+        print(f"[ERROR] Key exhausted: {current_key[:20]}...")
         
         for i in range(len(self.api_keys)):
             key = self.api_keys[i]
             if key not in self.exhausted_keys:
                 self.current_key_index = i
-                print(f"ЁЯФД Rotated to key: {key[:20]}...")
+                print(f"[API] Rotated to key: {key[:20]}...")
                 return key
         
-        print("тЭМ All API keys exhausted!")
+        print("[ERROR] All API keys exhausted!")
         return None
     
     def is_quota_error(self, error_message: str) -> bool:
@@ -803,7 +803,7 @@ def update_job_progress(job_id: str, status: str, progress: str, **kwargs):
     try:
         persistent_storage.update_job(job_id, status, progress, **kwargs)
     except Exception as e:
-        print(f"тЪая╕П Error updating job progress: {e}")
+        print(f"[ERROR] Error updating job progress: {e}")
 
 def clean_unwanted_text(text: str) -> str:
     """Remove unwanted text strings from scraped content"""
@@ -840,7 +840,7 @@ def clean_text_for_pdf(text: str) -> str:
 async def capture_page_screenshot_ultra_robust(page, url: str, topic: str) -> Optional[bytes]:
     """Ultra-robust screenshot capture with maximum error handling"""
     try:
-        print(f"ЁЯУ╕ Capturing screenshot for URL: {url}")
+        print(f"[SCREENSHOT] Capturing screenshot for URL: {url}")
         
         # Navigate with multiple timeout layers
         navigation_attempts = 3
@@ -853,9 +853,9 @@ async def capture_page_screenshot_ultra_robust(page, url: str, topic: str) -> Op
                 break
             except asyncio.TimeoutError:
                 if attempt == navigation_attempts - 1:
-                    print(f"тП▒я╕П Navigation timeout after {navigation_attempts} attempts for {url}")
+                    print(f"[TIMEOUT] Navigation timeout after {navigation_attempts} attempts for {url}")
                     return None
-                print(f"тП▒я╕П Navigation attempt {attempt + 1} timeout, retrying...")
+                print(f"[TIMEOUT] Navigation attempt {attempt + 1} timeout, retrying...")
                 await asyncio.sleep(2)
         
         # Wait for page to settle
@@ -885,24 +885,24 @@ async def capture_page_screenshot_ultra_robust(page, url: str, topic: str) -> Op
                     )
                     if elements:
                         mcq_elements.extend(elements)
-                        print(f"ЁЯУЭ Found {len(elements)} {description} elements")
+                        print(f"[FOUND] Found {len(elements)} {description} elements")
                 else:
                     element = await asyncio.wait_for(
                         page.query_selector(selector), timeout=3.0
                     )
                     if element:
                         mcq_elements.append(element)
-                        print(f"ЁЯУЭ Found {description} element")
+                        print(f"[FOUND] Found {description} element")
                         if 'questionBody' in selector:
                             break  # We found the main question, stop looking for fallback
             except asyncio.TimeoutError:
                 continue
             except Exception as e:
-                print(f"тЪая╕П Error finding {description}: {e}")
+                print(f"[ERROR] Error finding {description}: {e}")
                 continue
         
         if not mcq_elements:
-            print(f"тЭМ No MCQ elements found on {url}")
+            print(f"[ERROR] No MCQ elements found on {url}")
             return None
         
         # Calculate bounding box with error handling
@@ -916,7 +916,7 @@ async def capture_page_screenshot_ultra_robust(page, url: str, topic: str) -> Op
                 continue
         
         if not bounding_boxes:
-            print(f"тЭМ Could not get valid bounding boxes for {url}")
+            print(f"[ERROR] Could not get valid bounding boxes for {url}")
             return None
         
         # Calculate combined bounding box
@@ -939,126 +939,65 @@ async def capture_page_screenshot_ultra_robust(page, url: str, topic: str) -> Op
         screenshot_width = max(screenshot_width, 100)
         screenshot_height = max(screenshot_height, 100)
         
-        print(f"ЁЯУР Screenshot dimensions: {screenshot_width}x{screenshot_height} at ({min_x}, {min_y})")
+        print(f"[SCREENSHOT] Screenshot dimensions: {screenshot_width}x{screenshot_height}")
         
-        # Capture screenshot with timeout
-        try:
-            screenshot = await asyncio.wait_for(
-                page.screenshot(
-                    clip={
-                        "x": min_x,
-                        "y": min_y,
-                        "width": screenshot_width,
-                        "height": screenshot_height
-                    },
-                    type="png"
-                ),
-                timeout=10.0
-            )
-            
-            print(f"тЬЕ Screenshot captured successfully for {url}")
-            return screenshot
-            
-        except asyncio.TimeoutError:
-            print(f"тП▒я╕П Screenshot capture timeout for {url}")
-            return None
+        # Take screenshot with timeout
+        screenshot_bytes = await asyncio.wait_for(
+            page.screenshot(
+                clip={
+                    'x': min_x,
+                    'y': min_y,
+                    'width': screenshot_width,
+                    'height': screenshot_height
+                },
+                type='png',
+                quality=90
+            ),
+            timeout=10.0
+        )
         
+        print(f"[SUCCESS] Screenshot captured successfully for {url}")
+        return screenshot_bytes
+        
+    except asyncio.TimeoutError:
+        print(f"[TIMEOUT] Screenshot capture timeout for {url}")
+        return None
     except Exception as e:
-        print(f"тЭМ Error capturing screenshot for {url}: {str(e)}")
+        print(f"[ERROR] Error capturing screenshot for {url}: {e}")
         return None
 
-async def scrape_testbook_page_with_screenshot_ultra_robust(context: BrowserContext, url: str, topic: str) -> Optional[dict]:
-    """Ultra-robust screenshot scraping with maximum error handling"""
-    page = None
-    try:
-        print(f"ЁЯФН Processing URL with screenshot (ultra-robust): {url}")
-        
-        # Create page with timeout
-        try:
-            page = await asyncio.wait_for(context.new_page(), timeout=8.0)
-        except asyncio.TimeoutError:
-            print(f"тП▒я╕П Page creation timeout for {url}")
-            return None
-        
-        # Quick relevance check first
-        try:
-            await asyncio.wait_for(
-                page.goto(url, wait_until="domcontentloaded", timeout=15000),
-                timeout=20.0
-            )
-        except asyncio.TimeoutError:
-            print(f"тП▒я╕П Page load timeout for {url}")
-            return None
-        
-        await page.wait_for_timeout(800)
-        
-        # Extract question for relevance check
-        question_text = ""
-        try:
-            question_element = await page.query_selector('h1.questionBody.tag-h1')
-            if not question_element:
-                question_element = await page.query_selector('div.questionBody')
-            
-            if question_element:
-                question_text = await question_element.inner_text()
-            else:
-                print(f"тЭМ No question element found on {url}")
-                return None
-                
-        except Exception as e:
-            print(f"тЪая╕П Error extracting question from {url}: {e}")
-            return None
-        
-        # Check relevance
-        if not is_mcq_relevant(question_text, topic):
-            print(f"тЭМ MCQ not relevant for topic '{topic}' on {url}")
-            return None
-        
-        # Capture screenshot
-        screenshot = await capture_page_screenshot_ultra_robust(page, url, topic)
-        
-        if not screenshot:
-            print(f"тЭМ Failed to capture screenshot for {url}")
-            return None
-        
-        return {
-            "url": url,
-            "screenshot": screenshot,
-            "is_relevant": True
-        }
-        
-    except Exception as e:
-        print(f"тЭМ Error processing {url} with screenshot: {str(e)}")
-        return None
-    finally:
-        if page:
-            try:
-                await asyncio.wait_for(page.close(), timeout=3.0)
-            except:
-                pass
-
-def is_mcq_relevant(question_text: str, search_topic: str) -> bool:
-    """Enhanced relevance checking"""
-    if not question_text or not search_topic:
+def is_mcq_relevant(question: str, topic: str) -> bool:
+    """Enhanced MCQ relevance checking using advanced topic matching"""
+    
+    if not question or not topic:
         return False
     
-    question_lower = question_text.lower()
-    topic_lower = search_topic.lower()
+    question_lower = question.lower()
+    topic_lower = topic.lower()
     
-    # Enhanced topic matching
+    # Direct match
+    if topic_lower in question_lower:
+        return True
+    
+    # Generate topic variations
     topic_variations = [topic_lower]
     
-    # Extended topic stems
+    # Add plurals and singulars
+    if topic_lower.endswith('s') and len(topic_lower) > 3:
+        topic_variations.append(topic_lower[:-1])  # Remove 's'
+    elif not topic_lower.endswith('s'):
+        topic_variations.append(topic_lower + 's')  # Add 's'
+    
+    # Add common word variations
     topic_stems = {
-        'biology': ['biological', 'bio', 'organism', 'living', 'life', 'cell', 'plant', 'animal', 'species', 'photosynthesis', 'respiration', 'DNA', 'gene'],
-        'physics': ['physical', 'force', 'energy', 'motion', 'matter', 'quantum', 'wave', 'particle', 'newton', 'gravity', 'electricity', 'magnetism'],
-        'chemistry': ['chemical', 'reaction', 'compound', 'element', 'molecule', 'atom', 'bond', 'formula', 'water', 'oxygen', 'carbon', 'acid'],
-        'heart': ['cardiac', 'cardiovascular', 'circulation', 'blood', 'pulse', 'artery', 'vein', 'pressure', 'organ', 'pump'],
-        'mathematics': ['mathematical', 'math', 'equation', 'number', 'calculation', 'formula', 'solve', 'calculate', 'area', 'radius', 'circle', 'triangle'],
-        'history': ['historical', 'past', 'ancient', 'period', 'era', 'dynasty', 'empire', 'civilization', 'war', 'battle', 'year', 'century'],
-        'geography': ['geographical', 'location', 'place', 'region', 'area', 'continent', 'country', 'climate', 'capital', 'city', 'ocean', 'river', 'mountain'],
-        'economics': ['economic', 'economy', 'market', 'trade', 'finance', 'gdp', 'inflation', 'banking', 'money', 'currency', 'investment'],
-        'politics': ['political', 'government', 'policy', 'administration', 'governance', 'democracy', 'election', 'president', 'minister', 'parliament'],
+        'history': ['historical', 'historic', 'ancient', 'medieval', 'modern', 'past', 'civilization', 'empire', 'dynasty', 'period'],
+        'geography': ['geographical', 'geographic', 'earth', 'climate', 'mountain', 'river', 'ocean', 'continent', 'country', 'capital'],
+        'biology': ['biological', 'life', 'organism', 'plant', 'animal', 'human', 'genetics', 'evolution', 'ecology', 'biodiversity'],
+        'physics': ['physical', 'matter', 'energy', 'force', 'motion', 'electricity', 'magnetism', 'light', 'sound', 'quantum'],
+        'chemistry': ['chemical', 'element', 'compound', 'reaction', 'acid', 'base', 'molecular', 'atomic', 'organic', 'inorganic'],
+        'mathematics': ['mathematical', 'number', 'equation', 'formula', 'geometry', 'algebra', 'calculus', 'statistics', 'probability'],
+        'economics': ['economic', 'economy', 'market', 'trade', 'finance', 'money', 'banking', 'investment', 'inflation', 'gdp'],
+        'politics': ['political', 'government', 'policy', 'democracy', 'election', 'constitution', 'law', 'rights', 'parliament'],
         'computer': ['computing', 'software', 'hardware', 'algorithm', 'programming', 'digital', 'binary', 'data', 'internet', 'technology'],
         'science': ['scientific', 'research', 'theory', 'experiment', 'hypothesis', 'discovery', 'planet', 'solar', 'universe', 'nature'],
         'english': ['grammar', 'vocabulary', 'literature', 'language', 'sentence', 'word', 'comprehension', 'reading', 'writing'],
@@ -1126,17 +1065,17 @@ async def search_google_custom(topic: str, exam_type: str = "SSC") -> List[str]:
                 "start": start_index
             }
             
-            print(f"ЁЯФН Fetching results {start_index}-{start_index+9} for topic: {topic}")
-            print(f"ЁЯФС Using key: {current_key[:20]}... (Remaining: {api_key_manager.get_remaining_keys()})")
+            print(f"[SEARCH] Fetching results {start_index}-{start_index+9} for topic: {topic}")
+            print(f"[API] Using key: {current_key[:20]}... (Remaining: {api_key_manager.get_remaining_keys()})")
             
             response = requests.get(base_url, params=params, headers=headers)
             
             if response.status_code == 429 or (response.status_code == 403 and "quota" in response.text.lower()):
-                print(f"тЪая╕П Quota exceeded for current key. Attempting rotation...")
+                print(f"[ERROR] Quota exceeded for current key. Attempting rotation...")
                 
                 next_key = api_key_manager.rotate_key()
                 if next_key is None:
-                    print("тЭМ All API keys exhausted!")
+                    print("[ERROR] All API keys exhausted!")
                     raise Exception("All Servers are exhausted due to intense use")
                 
                 continue
@@ -1155,7 +1094,7 @@ async def search_google_custom(topic: str, exam_type: str = "SSC") -> List[str]:
                     batch_links.append(link)
             
             all_testbook_links.extend(batch_links)
-            print(f"тЬЕ Found {len(batch_links)} Testbook links in this batch. Total so far: {len(all_testbook_links)}")
+            print(f"[SUCCESS] Found {len(batch_links)} Testbook links in this batch. Total so far: {len(all_testbook_links)}")
             
             if len(data["items"]) < 10:
                 print(f"Reached end of results with {len(data['items'])} items in last batch")
@@ -1164,11 +1103,11 @@ async def search_google_custom(topic: str, exam_type: str = "SSC") -> List[str]:
             start_index += 10
             await asyncio.sleep(0.5)
         
-        print(f"тЬЕ Total Testbook links found: {len(all_testbook_links)}")
+        print(f"[SUCCESS] Total Testbook links found: {len(all_testbook_links)}")
         return all_testbook_links
         
     except Exception as e:
-        print(f"тЭМ Error searching Google: {e}")
+        print(f"[ERROR] Error searching Google: {e}")
         if "All Servers are exhausted due to intense use" in str(e):
             raise e
         return []
@@ -1183,7 +1122,7 @@ async def scrape_mcq_content_with_page_ultra_robust(page, url: str, search_topic
                 timeout=15.0
             )
         except asyncio.TimeoutError:
-            print(f"тП▒я╕П Navigation timeout for {url}")
+            print(f"[TIMEOUT] Navigation timeout for {url}")
             return None
         
         await page.wait_for_timeout(800)
@@ -1201,21 +1140,21 @@ async def scrape_mcq_content_with_page_ultra_robust(page, url: str, search_topic
                 except asyncio.TimeoutError:
                     continue
         except Exception as e:
-            print(f"тЪая╕П Error extracting question from {url}: {e}")
+            print(f"[ERROR] Error extracting question from {url}: {e}")
             return None
         
         if not question:
-            print(f"тЭМ No question found on {url}")
+            print(f"[ERROR] No question found on {url}")
             return None
         
         question = clean_unwanted_text(question)
         
         # Check relevance
         if not is_mcq_relevant(question, search_topic):
-            print(f"тЭМ MCQ not relevant for topic '{search_topic}'")
+            print(f"[ERROR] MCQ not relevant for topic '{search_topic}'")
             return None
         
-        print(f"тЬЕ MCQ relevant - topic '{search_topic}' found in question body")
+        print(f"[SUCCESS] MCQ relevant - topic '{search_topic}' found in question body")
         
         # Extract other elements
         options = []
@@ -1255,7 +1194,7 @@ async def scrape_mcq_content_with_page_ultra_robust(page, url: str, search_topic
                 pass
                 
         except asyncio.TimeoutError:
-            print(f"тП▒я╕П Timeout extracting elements from {url}")
+            print(f"[TIMEOUT] Timeout extracting elements from {url}")
         
         # Return MCQ data
         if question and (options or answer):
@@ -1271,7 +1210,7 @@ async def scrape_mcq_content_with_page_ultra_robust(page, url: str, search_topic
         return None
         
     except Exception as e:
-        print(f"тЭМ Error scraping {url}: {e}")
+        print(f"[ERROR] Error scraping {url}: {e}")
         return None
 
 async def scrape_mcq_content_ultra_robust(url: str, search_topic: str) -> Optional[MCQData]:
@@ -1282,13 +1221,13 @@ async def scrape_mcq_content_ultra_robust(url: str, search_topic: str) -> Option
     
     for attempt in range(max_attempts):
         try:
-            print(f"ЁЯФН Scraping attempt {attempt + 1} for {url}")
+            print(f"[SCRAPE] Scraping attempt {attempt + 1} for {url}")
             
             # Get context with retries
             try:
                 context = await browser_pool.get_context()
             except Exception as e:
-                print(f"тЪая╕П Failed to get browser context (attempt {attempt + 1}): {e}")
+                print(f"[ERROR] Failed to get browser context (attempt {attempt + 1}): {e}")
                 if attempt == max_attempts - 1:
                     return None
                 await asyncio.sleep(3)
@@ -1298,7 +1237,7 @@ async def scrape_mcq_content_ultra_robust(url: str, search_topic: str) -> Option
             try:
                 page = await asyncio.wait_for(context.new_page(), timeout=8.0)
             except asyncio.TimeoutError:
-                print(f"тП▒я╕П Page creation timeout (attempt {attempt + 1})")
+                print(f"[TIMEOUT] Page creation timeout (attempt {attempt + 1})")
                 if context:
                     await context.close()
                 if attempt == max_attempts - 1:
@@ -1311,7 +1250,7 @@ async def scrape_mcq_content_ultra_robust(url: str, search_topic: str) -> Option
             return result
             
         except Exception as e:
-            print(f"тЭМ Error in scraping attempt {attempt + 1} for {url}: {e}")
+            print(f"[ERROR] Error in scraping attempt {attempt + 1} for {url}: {e}")
             if attempt == max_attempts - 1:
                 return None
             await asyncio.sleep(3)
@@ -1332,7 +1271,7 @@ async def scrape_mcq_content_ultra_robust(url: str, search_topic: str) -> Option
 def generate_pdf(mcqs: List[MCQData], topic: str, job_id: str, relevant_mcqs: int, irrelevant_mcqs: int, total_links: int) -> str:
     """Generate PDF with enhanced error handling"""
     try:
-        pdf_dir = Path("/app/pdfs")
+        pdf_dir = Path("/tmp/pdfs")
         pdf_dir.mkdir(exist_ok=True)
         
         filename = f"Testbook_MCQs_{topic.replace(' ', '_')}_{job_id}.pdf"
@@ -1438,14 +1377,14 @@ def generate_pdf(mcqs: List[MCQData], topic: str, job_id: str, relevant_mcqs: in
         story = []
         
         # Header
-        story.append(Paragraph("ЁЯУЪ ULTRA-ROBUST MCQ COLLECTION", title_style))
+        story.append(Paragraph("[BOOK] ULTRA-ROBUST MCQ COLLECTION", title_style))
         story.append(Spacer(1, 0.2*inch))
         story.append(Paragraph(f"Subject: <b>{topic.upper()}</b>", subtitle_style))
         story.append(Spacer(1, 0.3*inch))
         
         # Statistics
         stats_data = [
-            ['ЁЯУК Collection Statistics', ''],
+            ['[JOB] Collection Statistics', ''],
             ['Search Topic', f'{topic}'],
             ['Total Relevant Questions', f'{len(mcqs)}'],
             ['Filtering Applied', 'Ultra-Smart Topic-based'],
@@ -1475,7 +1414,7 @@ def generate_pdf(mcqs: List[MCQData], topic: str, job_id: str, relevant_mcqs: in
         story.append(Spacer(1, 0.4*inch))
         
         # Separator
-        story.append(Paragraph("тХР" * 80, ParagraphStyle('separator', textColor=primary_color, alignment=TA_CENTER)))
+        story.append(Paragraph("=" * 80, ParagraphStyle('separator', textColor=primary_color, alignment=TA_CENTER)))
         story.append(PageBreak())
         
         # MCQ content
@@ -1488,7 +1427,7 @@ def generate_pdf(mcqs: List[MCQData], topic: str, job_id: str, relevant_mcqs: in
             if mcq.exam_source_heading or mcq.exam_source_title:
                 exam_source_text = ""
                 if mcq.exam_source_heading:
-                    exam_source_text += f"ЁЯУЛ {mcq.exam_source_heading}"
+                    exam_source_text += f"[SOURCE] {mcq.exam_source_heading}"
                 if mcq.exam_source_title:
                     exam_source_text += f" - {mcq.exam_source_title}"
                 
@@ -1503,7 +1442,7 @@ def generate_pdf(mcqs: List[MCQData], topic: str, job_id: str, relevant_mcqs: in
             
             # Options
             if mcq.options:
-                story.append(Paragraph("ЁЯУЭ <b>OPTIONS:</b>", option_style))
+                story.append(Paragraph("[FOUND] <b>OPTIONS:</b>", option_style))
                 for j, option in enumerate(mcq.options):
                     option_letter = chr(ord('A') + j) if j < 26 else f"Option {j+1}"
                     option_text = option.replace('\n', '<br/>')
@@ -1513,13 +1452,13 @@ def generate_pdf(mcqs: List[MCQData], topic: str, job_id: str, relevant_mcqs: in
             
             # Answer
             if mcq.answer:
-                story.append(Paragraph("ЁЯТб <b>ANSWER & DETAILED SOLUTION:</b>", answer_style))
+                story.append(Paragraph("[ANSWER] <b>ANSWER & DETAILED SOLUTION:</b>", answer_style))
                 answer_text = mcq.answer.replace('\n', '<br/>')
                 story.append(Paragraph(answer_text, answer_style))
             
             # Separator
             story.append(Spacer(1, 0.25*inch))
-            story.append(Paragraph("тФА" * 100, ParagraphStyle('divider', textColor=primary_color, alignment=TA_CENTER, fontSize=8)))
+            story.append(Paragraph("-" * 100, ParagraphStyle('divider', textColor=primary_color, alignment=TA_CENTER, fontSize=8)))
             story.append(Spacer(1, 0.25*inch))
             
             # Page break
@@ -1529,11 +1468,11 @@ def generate_pdf(mcqs: List[MCQData], topic: str, job_id: str, relevant_mcqs: in
         # Build PDF
         doc.build(story)
         
-        print(f"тЬЕ Ultra-robust PDF generated successfully: {filename} with {len(mcqs)} MCQs")
+        print(f"[SUCCESS] Ultra-robust PDF generated successfully: {filename} with {len(mcqs)} MCQs")
         return filename
         
     except Exception as e:
-        print(f"тЭМ Error generating PDF: {e}")
+        print(f"[ERROR] Error generating PDF: {e}")
         raise
 
 def generate_image_based_pdf(screenshots_data: List[dict], topic: str, exam_type: str = "SSC") -> str:
@@ -1550,7 +1489,7 @@ def generate_image_based_pdf(screenshots_data: List[dict], topic: str, exam_type
         
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         filename = f"mcq_screenshots_{topic}_{exam_type}_{timestamp}.pdf"
-        filepath = f"/app/pdfs/{filename}"
+        filepath = f"/tmp/pdfs/{filename}"
         
         os.makedirs(os.path.dirname(filepath), exist_ok=True)
         
@@ -1577,7 +1516,7 @@ def generate_image_based_pdf(screenshots_data: List[dict], topic: str, exam_type
         )
         
         # Title page
-        story.append(Paragraph(f"ЁЯУЪ ULTRA-ROBUST {exam_type} MCQ COLLECTION", title_style))
+        story.append(Paragraph(f"[BOOK] ULTRA-ROBUST {exam_type} MCQ COLLECTION", title_style))
         story.append(Spacer(1, 0.3*inch))
         story.append(Paragraph(f"Subject: <b>{topic.upper()}</b>", header_style))
         story.append(Spacer(1, 0.3*inch))
@@ -1632,190 +1571,184 @@ def generate_image_based_pdf(screenshots_data: List[dict], topic: str, exam_type
             if i < len(screenshots_data):
                 story.append(PageBreak())
         
+        # Build PDF
         doc.build(story)
         
-        print(f"тЬЕ Ultra-robust image PDF generated: {filename} with {len(screenshots_data)} screenshots")
+        print(f"[SUCCESS] Image-based PDF generated successfully: {filename}")
         return filename
         
     except Exception as e:
-        print(f"тЭМ Error generating image PDF: {e}")
+        print(f"[ERROR] Error generating image PDF: {e}")
         raise
 
-async def process_mcq_extraction(job_id: str, topic: str, exam_type: str = "SSC", pdf_format: str = "text"):
-    """Ultra-robust MCQ extraction with persistent job tracking"""
+async def scrape_mcqs_ultra_robust(topic: str, exam_type: str = "SSC") -> tuple[List[MCQData], int, int]:
+    """Ultra-robust MCQ scraping process"""
     try:
-        update_job_progress(job_id, "running", f"ЁЯФН Searching for {exam_type} '{topic}' results with ultra-smart filtering...")
-        
-        # Search for links
+        # Search for relevant links
+        print(f"[SEARCH] Starting search for topic: {topic}, exam: {exam_type}")
         links = await search_google_custom(topic, exam_type)
         
         if not links:
-            update_job_progress(job_id, "completed", f"тЭМ No {exam_type} results found for '{topic}'. Please try another topic.", 
-                              total_links=0, processed_links=0, mcqs_found=0)
-            return
+            print("[ERROR] No links found")
+            return [], 0, 0
         
-        update_job_progress(job_id, "running", f"тЬЕ Found {len(links)} {exam_type} links. Starting ultra-smart filtering extraction...", 
-                          total_links=len(links))
+        print(f"[SEARCH] Found {len(links)} links to process")
         
-        if pdf_format == "image":
-            await process_screenshot_extraction_ultra_robust(job_id, topic, exam_type, links)
-        else:
-            await process_text_extraction_ultra_robust(job_id, topic, exam_type, links)
-        
-    except Exception as e:
-        error_message = str(e)
-        print(f"тЭМ Critical error in process_mcq_extraction: {e}")
-        update_job_progress(job_id, "error", f"тЭМ Error: {error_message}")
-
-async def process_text_extraction_ultra_robust(job_id: str, topic: str, exam_type: str, links: List[str]):
-    """Ultra-robust text extraction with persistent job tracking"""
-    try:
-        await browser_pool.initialize()
-        
+        # Process links with ultra-robust handling
         mcqs = []
-        relevant_mcqs = 0
-        irrelevant_mcqs = 0
+        relevant_count = 0
+        irrelevant_count = 0
         
-        print(f"ЁЯЪА Starting ULTRA-ROBUST text processing: {len(links)} links")
+        max_concurrent = 3  # Reduced for stability
+        semaphore = asyncio.Semaphore(max_concurrent)
         
-        for i, url in enumerate(links):
-            print(f"ЁЯФН Processing link {i + 1}/{len(links)}: {url}")
-            
-            # Update progress with persistent storage
-            current_progress = f"ЁЯФН Processing link {i + 1}/{len(links)} - Ultra-smart filtering enabled..."
-            update_job_progress(job_id, "running", current_progress, 
-                              processed_links=i, mcqs_found=len(mcqs))
+        async def process_link_with_semaphore(url):
+            async with semaphore:
+                return await scrape_mcq_content_ultra_robust(url, topic)
+        
+        # Process in batches for memory efficiency
+        batch_size = 5
+        for i in range(0, len(links), batch_size):
+            batch_links = links[i:i+batch_size]
+            print(f"[BATCH] Processing batch {i//batch_size + 1} ({len(batch_links)} links)")
             
             try:
-                result = await scrape_mcq_content_ultra_robust(url, topic)
+                batch_results = await asyncio.gather(
+                    *[process_link_with_semaphore(url) for url in batch_links],
+                    return_exceptions=True
+                )
                 
-                if result:
-                    mcqs.append(result)
-                    relevant_mcqs += 1
-                    print(f"тЬЕ Found relevant MCQ {i + 1}/{len(links)} - Total: {len(mcqs)}")
-                else:
-                    irrelevant_mcqs += 1
-                    print(f"тЪая╕П Skipped irrelevant MCQ {i + 1}/{len(links)}")
-                    
-            except Exception as e:
-                print(f"тЭМ Error processing link {i + 1}: {e}")
-                irrelevant_mcqs += 1
-            
-            # Update progress
-            update_job_progress(job_id, "running", 
-                              f"тЬЕ Processed {i + 1}/{len(links)} links - Found {len(mcqs)} relevant MCQs", 
-                              processed_links=i + 1, mcqs_found=len(mcqs))
-            
-            # Small delay
-            if i < len(links) - 1:
+                for result in batch_results:
+                    if isinstance(result, MCQData):
+                        mcqs.append(result)
+                        relevant_count += 1
+                        print(f"[SUCCESS] Relevant MCQ found. Total: {len(mcqs)}")
+                    elif result is None:
+                        irrelevant_count += 1
+                    elif isinstance(result, Exception):
+                        print(f"[ERROR] Error processing link: {result}")
+                        irrelevant_count += 1
+                
+                # Memory cleanup between batches
+                import gc
+                gc.collect()
+                
+                # Brief pause between batches
                 await asyncio.sleep(1)
+                
+            except Exception as e:
+                print(f"[ERROR] Error processing batch: {e}")
+                irrelevant_count += len(batch_links)
         
-        await browser_pool.close()
+        print(f"[COMPLETE] Scraping complete. Found {len(mcqs)} relevant MCQs out of {len(links)} total links")
+        return mcqs, relevant_count, irrelevant_count
         
-        if not mcqs:
-            update_job_progress(job_id, "completed", 
-                              f"тЭМ No relevant MCQs found for '{topic}' across {len(links)} links.", 
-                              total_links=len(links), processed_links=len(links), mcqs_found=0)
-            return
-        
-        # Generate PDF
-        final_message = f"тЬЕ Ultra-smart filtering complete! Found {relevant_mcqs} relevant MCQs from {len(links)} total links."
-        update_job_progress(job_id, "running", final_message + " Generating PDF...", 
-                          total_links=len(links), processed_links=len(links), mcqs_found=len(mcqs))
-        
-        try:
-            filename = generate_pdf(mcqs, topic, job_id, relevant_mcqs, irrelevant_mcqs, len(links))
-            pdf_url = f"/api/download-pdf/{filename}"
-            
-            generated_pdfs[job_id] = {
-                "filename": filename,
-                "topic": topic,
-                "exam_type": exam_type,
-                "mcqs_count": len(mcqs),
-                "generated_at": datetime.now()
-            }
-            
-            success_message = f"ЁЯОЙ SUCCESS! Generated PDF with {len(mcqs)} relevant MCQs for topic '{topic}'."
-            update_job_progress(job_id, "completed", success_message, 
-                              total_links=len(links), processed_links=len(links), 
-                              mcqs_found=len(mcqs), pdf_url=pdf_url)
-            
-            print(f"тЬЕ Job {job_id} completed successfully with {len(mcqs)} MCQs")
-            
-        except Exception as e:
-            print(f"тЭМ Error generating PDF: {e}")
-            update_job_progress(job_id, "error", f"тЭМ Error generating PDF: {str(e)}")
-    
     except Exception as e:
-        print(f"тЭМ Critical error in text extraction: {e}")
-        update_job_progress(job_id, "error", f"тЭМ Critical error: {str(e)}")
-        await browser_pool.close()
+        print(f"[ERROR] Error in ultra-robust MCQ scraping: {e}")
+        return [], 0, 0
 
-async def process_screenshot_extraction_ultra_robust(job_id: str, topic: str, exam_type: str, links: List[str]):
-    """Ultra-robust screenshot extraction with persistent job tracking"""
+async def capture_screenshots_ultra_robust(topic: str, exam_type: str = "SSC") -> List[dict]:
+    """Capture screenshots from MCQ pages with ultra-robust error handling"""
     try:
-        await browser_pool.initialize()
+        print(f"[SCREENSHOT] Starting screenshot capture for topic: {topic}, exam: {exam_type}")
+        
+        # Search for relevant links
+        links = await search_google_custom(topic, exam_type)
+        
+        if not links:
+            print("[ERROR] No links found for screenshots")
+            return []
+        
+        print(f"[SCREENSHOT] Found {len(links)} links for screenshot capture")
         
         screenshot_data = []
-        relevant_mcqs = 0
-        irrelevant_mcqs = 0
+        max_screenshots = 30  # Limit to prevent memory issues
+        processed_count = 0
         
-        print(f"ЁЯЪА Starting ULTRA-ROBUST screenshot processing: {len(links)} links")
-        
-        for i, url in enumerate(links):
-            print(f"ЁЯУ╕ Processing screenshot {i + 1}/{len(links)}: {url}")
-            
-            # Update progress with persistent storage
-            current_progress = f"ЁЯУ╕ Capturing screenshot {i + 1}/{len(links)} - Ultra-smart filtering enabled..."
-            update_job_progress(job_id, "running", current_progress, 
-                              processed_links=i, mcqs_found=len(screenshot_data))
-            
-            max_attempts = 3
-            for attempt in range(max_attempts):
+        for i, url in enumerate(links[:max_screenshots]):
+            if processed_count >= max_screenshots:
+                break
+                
+            try:
+                print(f"[SCREENSHOT] Processing {i+1}/{min(len(links), max_screenshots)}: {url}")
+                
+                context = None
+                page = None
+                
                 try:
+                    # Get browser context
                     context = await browser_pool.get_context()
-                    result = await scrape_testbook_page_with_screenshot_ultra_robust(context, url, topic)
+                    page = await context.new_page()
                     
-                    if result and result.get('is_relevant'):
-                        screenshot_data.append(result)
-                        relevant_mcqs += 1
-                        print(f"тЬЕ Captured relevant screenshot {i + 1}/{len(links)} - Total: {len(screenshot_data)}")
+                    # Check if page contains relevant MCQ content first
+                    mcq_data = await scrape_mcq_content_with_page_ultra_robust(page, url, topic)
+                    
+                    if mcq_data:
+                        # Page is relevant, capture screenshot
+                        screenshot_bytes = await capture_page_screenshot_ultra_robust(page, url, topic)
+                        
+                        if screenshot_bytes:
+                            screenshot_data.append({
+                                'url': url,
+                                'screenshot': screenshot_bytes,
+                                'topic': topic,
+                                'mcq_data': mcq_data
+                            })
+                            processed_count += 1
+                            print(f"[SUCCESS] Screenshot captured for relevant MCQ ({processed_count} total)")
+                        else:
+                            print(f"[ERROR] Failed to capture screenshot for {url}")
                     else:
-                        irrelevant_mcqs += 1
-                        print(f"тЪая╕П Skipped irrelevant screenshot {i + 1}/{len(links)}")
-                    
-                    await context.close()
-                    break  # Success
-                    
+                        print(f"[SKIP] No relevant MCQ found on {url}")
+                
                 except Exception as e:
-                    print(f"тЭМ Error capturing screenshot {i + 1} (attempt {attempt + 1}): {e}")
-                    if attempt == max_attempts - 1:
-                        irrelevant_mcqs += 1
-                    else:
-                        await asyncio.sleep(2)
+                    print(f"[ERROR] Error processing {url}: {e}")
+                finally:
+                    if page:
+                        try:
+                            await page.close()
+                        except:
+                            pass
+                    if context:
+                        try:
+                            await context.close()
+                        except:
+                            pass
+                
+                # Memory cleanup and brief pause
+                if (i + 1) % 5 == 0:
+                    import gc
+                    gc.collect()
+                    await asyncio.sleep(1)
+                    
+            except Exception as e:
+                print(f"[ERROR] Unexpected error processing {url}: {e}")
+                continue
+        
+        print(f"[COMPLETE] Screenshot capture complete. Captured {len(screenshot_data)} relevant screenshots from {len(links)} total links")
+        return screenshot_data
+        
+    except Exception as e:
+        print(f"[ERROR] Error in ultra-robust screenshot capture: {e}")
+        return []
+
+# Background task for MCQ scraping
+async def scrape_mcqs_background(topic: str, exam_type: str, pdf_format: str, job_id: str):
+    """Background task for scraping MCQs with comprehensive error handling"""
+    try:
+        update_job_progress(job_id, "running", f"Starting MCQ search for topic: {topic}")
+        
+        if pdf_format == "image":
+            # Image-based PDF generation
+            screenshot_data = await capture_screenshots_ultra_robust(topic, exam_type)
             
-            # Update progress
-            update_job_progress(job_id, "running", 
-                              f"тЬЕ Processed {i + 1}/{len(links)} links - Captured {len(screenshot_data)} relevant screenshots", 
-                              processed_links=i + 1, mcqs_found=len(screenshot_data))
+            if not screenshot_data:
+                update_job_progress(job_id, "error", "No relevant screenshots could be captured")
+                return
             
-            # Small delay
-            if i < len(links) - 1:
-                await asyncio.sleep(1)
-        
-        await browser_pool.close()
-        
-        if not screenshot_data:
-            update_job_progress(job_id, "completed", 
-                              f"тЭМ No relevant screenshots captured for '{topic}'.", 
-                              total_links=len(links), processed_links=len(links), mcqs_found=0)
-            return
-        
-        # Generate PDF
-        try:
-            final_message = f"тЬЕ Screenshot capture complete! Captured {relevant_mcqs} relevant screenshots from {len(links)} total links."
+            final_message = f"Screenshot capture complete! Captured {len(screenshot_data)} relevant screenshots from 30 total links."
             update_job_progress(job_id, "running", final_message + " Generating PDF...", 
-                              total_links=len(links), processed_links=len(links), mcqs_found=len(screenshot_data))
+                              total_links=len(screenshot_data), processed_links=len(screenshot_data), mcqs_found=len(screenshot_data))
             
             filename = generate_image_based_pdf(screenshot_data, topic, exam_type)
             pdf_url = f"/api/download-pdf/{filename}"
@@ -1824,162 +1757,142 @@ async def process_screenshot_extraction_ultra_robust(job_id: str, topic: str, ex
                 "filename": filename,
                 "topic": topic,
                 "exam_type": exam_type,
-                "mcqs_count": len(screenshot_data),
-                "generated_at": datetime.now()
+                "format": "image",
+                "created_at": datetime.now().isoformat()
             }
             
-            success_message = f"ЁЯОЙ SUCCESS! Generated image-based PDF with {len(screenshot_data)} relevant screenshots for topic '{topic}'."
-            update_job_progress(job_id, "completed", success_message, 
-                              total_links=len(links), processed_links=len(links), 
-                              mcqs_found=len(screenshot_data), pdf_url=pdf_url)
+            update_job_progress(job_id, "completed", f"PDF generated successfully! Captured {len(screenshot_data)} relevant MCQ screenshots.", 
+                              pdf_url=pdf_url, mcqs_found=len(screenshot_data))
+        
+        else:
+            # Text-based PDF generation
+            links = await search_google_custom(topic, exam_type)
             
-            print(f"тЬЕ Screenshot job {job_id} completed successfully with {len(screenshot_data)} images")
+            if not links:
+                update_job_progress(job_id, "error", "No relevant links found for the given topic")
+                return
             
-        except Exception as e:
-            print(f"тЭМ Error generating image PDF: {e}")
-            update_job_progress(job_id, "error", f"тЭМ Error generating image PDF: {str(e)}")
-    
+            update_job_progress(job_id, "running", f"Found {len(links)} links. Starting MCQ extraction...", 
+                              total_links=len(links))
+            
+            mcqs, relevant_mcqs, irrelevant_mcqs = await scrape_mcqs_ultra_robust(topic, exam_type)
+            
+            if not mcqs:
+                update_job_progress(job_id, "error", "No relevant MCQs found for the given topic")
+                return
+            
+            update_job_progress(job_id, "running", f"Extracted {len(mcqs)} relevant MCQs. Generating PDF...", 
+                              total_links=len(links), processed_links=len(links), mcqs_found=len(mcqs))
+            
+            try:
+                filename = generate_pdf(mcqs, topic, job_id, relevant_mcqs, irrelevant_mcqs, len(links))
+                pdf_url = f"/api/download-pdf/{filename}"
+                
+                generated_pdfs[job_id] = {
+                    "filename": filename,
+                    "topic": topic,
+                    "exam_type": exam_type,
+                    "format": "text",
+                    "created_at": datetime.now().isoformat()
+                }
+                
+                update_job_progress(job_id, "completed", f"PDF generated successfully with {len(mcqs)} MCQs!", 
+                                  pdf_url=pdf_url, mcqs_found=len(mcqs))
+                
+            except Exception as e:
+                print(f"[ERROR] Error generating PDF: {e}")
+                update_job_progress(job_id, "error", f"Error generating PDF: {e}")
+                return
+        
     except Exception as e:
-        print(f"тЭМ Critical error in screenshot extraction: {e}")
-        update_job_progress(job_id, "error", f"тЭМ Critical error: {str(e)}")
-        await browser_pool.close()
+        print(f"[ERROR] Critical error in background task: {e}")
+        update_job_progress(job_id, "error", f"Critical error: {e}")
+    finally:
+        # Cleanup browser resources
+        try:
+            await browser_pool.close()
+            await browser_pool.initialize()
+        except:
+            pass
 
-# Enhanced API Routes
-@app.get("/api/health")
-async def health_check():
-    """Enhanced health check with system status"""
-    return {
-        "status": "healthy",
-        "message": "Ultra-Robust MCQ Scraper API is running",
-        "version": "3.0.0",
-        "browser_status": {
-            "installed": browser_installation_state["is_installed"],
-            "installation_attempted": browser_installation_state["installation_attempted"],
-            "installation_error": browser_installation_state.get("installation_error"),
-            "browser_pool_initialized": browser_pool.is_initialized
-        },
-        "active_jobs": len(persistent_storage.jobs),
-        "timestamp": datetime.now().isoformat()
-    }
-
-@app.post("/api/generate-mcq-pdf")
-async def generate_mcq_pdf(request: SearchRequest, background_tasks: BackgroundTasks):
-    """Generate MCQ PDF with ultra-robust error handling"""
-    job_id = str(uuid.uuid4())
-    
-    # Validate inputs
-    if not request.topic.strip():
-        raise HTTPException(status_code=400, detail="Topic is required")
-    
-    if request.exam_type not in ["SSC", "BPSC"]:
-        raise HTTPException(status_code=400, detail="Exam type must be SSC or BPSC")
-    
-    if request.pdf_format not in ["text", "image"]:
-        raise HTTPException(status_code=400, detail="PDF format must be 'text' or 'image'")
-    
-    # Initialize job progress with persistent storage
-    update_job_progress(
-        job_id, 
-        "running", 
-        f"ЁЯЪА Starting ultra-robust {request.exam_type} MCQ extraction for '{request.topic}' ({request.pdf_format} format)..."
-    )
-    
-    # Start background task
-    background_tasks.add_task(
-        process_mcq_extraction,
-        job_id=job_id,
-        topic=request.topic.strip(),
-        exam_type=request.exam_type,
-        pdf_format=request.pdf_format
-    )
-    
-    return {
-        "job_id": job_id,
-        "status": "running",
-        "message": f"Started ultra-robust {request.exam_type} MCQ extraction for '{request.topic}' ({request.pdf_format} format)",
-        "progress": f"ЁЯЪА Starting ultra-robust {request.exam_type} MCQ extraction for '{request.topic}' ({request.pdf_format} format)..."
-    }
+@app.post("/api/search-mcqs")
+async def search_mcqs(request: SearchRequest, background_tasks: BackgroundTasks):
+    """Start MCQ search process"""
+    try:
+        job_id = str(uuid.uuid4())
+        
+        # Store initial job status
+        update_job_progress(job_id, "starting", "Initializing MCQ search...")
+        
+        # Add background task
+        background_tasks.add_task(scrape_mcqs_background, request.topic, request.exam_type, request.pdf_format, job_id)
+        
+        return {"job_id": job_id, "status": "started", "message": "MCQ search started successfully"}
+        
+    except Exception as e:
+        print(f"[ERROR] Error starting MCQ search: {e}")
+        raise HTTPException(status_code=500, detail=f"Error starting search: {str(e)}")
 
 @app.get("/api/job-status/{job_id}")
 async def get_job_status(job_id: str):
-    """Get job status with persistent storage support"""
+    """Get job status"""
     try:
         job_data = persistent_storage.get_job(job_id)
         
         if not job_data:
+            # Check if this is a new job that hasn't been saved yet
             raise HTTPException(status_code=404, detail="Job not found")
         
-        print(f"ЁЯУК Returning persistent status for job {job_id}: {job_data.get('status')} - {job_data.get('progress', '')[:100]}...")
         return job_data
         
     except HTTPException:
         raise
     except Exception as e:
-        print(f"тЭМ Error getting job status for {job_id}: {e}")
-        return {
-            "job_id": job_id,
-            "status": "error",
-            "progress": f"Error retrieving job status: {str(e)}",
-            "total_links": 0,
-            "processed_links": 0,
-            "mcqs_found": 0,
-            "pdf_url": None
-        }
+        print(f"[ERROR] Error getting job status: {e}")
+        raise HTTPException(status_code=500, detail=f"Error getting job status: {str(e)}")
 
 @app.get("/api/download-pdf/{filename}")
 async def download_pdf(filename: str):
-    """Download generated PDF file"""
-    filepath = f"/app/pdfs/{filename}"
-    
-    if not os.path.exists(filepath):
-        raise HTTPException(status_code=404, detail="PDF file not found")
-    
-    return FileResponse(
-        path=filepath,
-        filename=filename,
-        media_type='application/pdf'
-    )
-
-@app.get("/api/jobs")
-async def get_all_jobs():
-    """Get all active jobs"""
+    """Download generated PDF"""
     try:
-        return {
-            "jobs": list(persistent_storage.jobs.values()),
-            "total_jobs": len(persistent_storage.jobs)
-        }
-    except Exception as e:
-        print(f"тЭМ Error getting all jobs: {e}")
-        return {"jobs": [], "total_jobs": 0}
-
-# Startup event
-@app.on_event("startup")
-async def startup_event():
-    """Initialize ultra-robust services on startup"""
-    print("ЁЯЪА Ultra-Robust MCQ Scraper API starting up...")
-    print(f"ЁЯУК Browser installation status: {browser_installation_state}")
-    print(f"ЁЯУВ Active jobs loaded: {len(persistent_storage.jobs)}")
-    
-    # Clean up old jobs
-    persistent_storage.cleanup_old_jobs()
-
-# Shutdown event
-@app.on_event("shutdown")
-async def shutdown_event():
-    """Enhanced cleanup on shutdown"""
-    print("ЁЯФД Ultra-Robust MCQ Scraper API shutting down...")
-    try:
-        # Save jobs before shutdown
-        persistent_storage.save_jobs()
-        print("ЁЯТ╛ Jobs saved to persistent storage")
+        filepath = f"/tmp/pdfs/{filename}"
         
-        # Close browser pool
-        await browser_pool.close()
-        print("тЬЕ Browser pool closed successfully")
+        if not os.path.exists(filepath):
+            raise HTTPException(status_code=404, detail="PDF file not found")
         
+        return FileResponse(
+            filepath, 
+            media_type="application/pdf",
+            filename=filename,
+            headers={"Content-Disposition": f"attachment; filename={filename}"}
+        )
+        
+    except HTTPException:
+        raise
     except Exception as e:
-        print(f"тЪая╕П Error during shutdown: {e}")
+        print(f"[ERROR] Error downloading PDF: {e}")
+        raise HTTPException(status_code=500, detail=f"Error downloading PDF: {str(e)}")
+
+@app.get("/api/health")
+async def health_check():
+    """Health check endpoint"""
+    return {
+        "status": "healthy",
+        "browser_installed": browser_installation_state["is_installed"],
+        "browser_error": browser_installation_state.get("installation_error"),
+        "timestamp": datetime.now().isoformat()
+    }
+
+@app.get("/")
+async def root():
+    """Root endpoint"""
+    return {"message": "Ultra-Robust MCQ Scraper API", "version": "3.0.0", "status": "running"}
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8001)
+    
+    # Cleanup old jobs on startup
+    persistent_storage.cleanup_old_jobs()
+    
+    print("[SERVER] Starting Ultra-Robust MCQ Scraper server...")
+    uvicorn.run(app, host="0.0.0.0", port=8001, log_level="info")
