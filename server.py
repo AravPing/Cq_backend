@@ -903,134 +903,194 @@ def clean_text_for_pdf(text: str) -> str:
     
     return cleaned.strip()
 
-async def capture_page_screenshot_ultra_robust(page, url: str, topic: str) -> Optional[bytes]:
-    """Ultra-robust screenshot capture with maximum error handling"""
+async def capture_mcq_screenshot_high_quality(page, url: str, topic: str) -> Optional[bytes]:
+    """
+    Capture high-quality screenshot of complete MCQ with all required elements.
+    
+    Captures ALL these elements in one crystal-clear screenshot:
+    - h1.questionBody.tag-h1 ✅
+    - div.questionBody ✅  
+    - li.option ✅ (all options)
+    - .solution ✅
+    - div.pyp-heading ✅
+    - div.pyp-title.line-ellipsis ✅
+    """
     try:
-        print(f"ЁЯУ╕ Capturing screenshot for URL: {url}")
+        print(f"📸 Capturing HIGH-QUALITY MCQ screenshot for URL: {url}")
         
         # Navigate with multiple timeout layers
         navigation_attempts = 3
         for attempt in range(navigation_attempts):
             try:
                 await asyncio.wait_for(
-                    page.goto(url, wait_until="domcontentloaded", timeout=15000),
-                    timeout=20.0
+                    page.goto(url, wait_until="networkidle", timeout=20000),
+                    timeout=25.0
                 )
                 break
             except asyncio.TimeoutError:
                 if attempt == navigation_attempts - 1:
-                    print(f"тП▒я╕П Navigation timeout after {navigation_attempts} attempts for {url}")
+                    print(f"⏱️ Navigation timeout after {navigation_attempts} attempts for {url}")
                     return None
-                print(f"тП▒я╕П Navigation attempt {attempt + 1} timeout, retrying...")
+                print(f"⏱️ Navigation attempt {attempt + 1} timeout, retrying...")
                 await asyncio.sleep(2)
         
-        # Wait for page to settle
-        await page.wait_for_timeout(1500)
+        # Set larger viewport for better quality and content coverage
+        await page.set_viewport_size({"width": 1920, "height": 1080})
+        await page.wait_for_timeout(2000)  # Allow content to load fully
         
-        # Set conservative viewport
-        await page.set_viewport_size({"width": 1024, "height": 768})
-        await page.wait_for_timeout(500)
+        print("🔍 Finding ALL required MCQ elements...")
         
-        # Find MCQ elements with timeout
-        mcq_elements = []
-        
-        element_selectors = [
-            ('h1.questionBody.tag-h1', 'question'),
-            ('div.questionBody', 'question fallback'),
-            ('li.option', 'options'),
-            ('.solution', 'solution'),
-            ('div.pyp-heading', 'exam heading'),
-            ('div.pyp-title.line-ellipsis', 'exam title')
+        # Define ALL required selectors (no early breaks)
+        required_selectors = [
+            ('h1.questionBody.tag-h1', 'main question heading', False),
+            ('div.questionBody', 'question body fallback', False),
+            ('li.option', 'answer options', True),  # Multiple elements expected
+            ('.solution', 'solution/answer', False),
+            ('div.pyp-heading', 'exam heading', False),
+            ('div.pyp-title.line-ellipsis', 'exam title', False)
         ]
         
-        for selector, description in element_selectors:
+        all_mcq_elements = []
+        elements_found = {}
+        
+        # Find ALL elements without early termination
+        for selector, description, is_multiple in required_selectors:
             try:
-                if 'option' in selector:
+                if is_multiple:
+                    # Find all elements for selectors that can have multiple matches
                     elements = await asyncio.wait_for(
-                        page.query_selector_all(selector), timeout=3.0
+                        page.query_selector_all(selector), timeout=5.0
                     )
                     if elements:
-                        mcq_elements.extend(elements)
-                        print(f"ЁЯУЭ Found {len(elements)} {description} elements")
+                        all_mcq_elements.extend(elements)
+                        elements_found[selector] = len(elements)
+                        print(f"  ✅ Found {len(elements)} {description} elements")
+                    else:
+                        print(f"  ⚠️ No {description} elements found")
                 else:
+                    # Find single element
                     element = await asyncio.wait_for(
-                        page.query_selector(selector), timeout=3.0
+                        page.query_selector(selector), timeout=5.0
                     )
                     if element:
-                        mcq_elements.append(element)
-                        print(f"ЁЯУЭ Found {description} element")
-                        if 'questionBody' in selector:
-                            break  # We found the main question, stop looking for fallback
+                        all_mcq_elements.append(element)
+                        elements_found[selector] = 1
+                        print(f"  ✅ Found {description} element")
+                    else:
+                        print(f"  ⚠️ No {description} element found")
+                        
             except asyncio.TimeoutError:
+                print(f"  ⏱️ Timeout finding {description}")
                 continue
             except Exception as e:
-                print(f"тЪая╕П Error finding {description}: {e}")
+                print(f"  ❌ Error finding {description}: {e}")
                 continue
         
-        if not mcq_elements:
-            print(f"тЭМ No MCQ elements found on {url}")
+        if not all_mcq_elements:
+            print("❌ No MCQ elements found on page")
             return None
         
-        # Calculate bounding box with error handling
-        bounding_boxes = []
-        for element in mcq_elements:
+        print(f"📋 Total elements found: {len(all_mcq_elements)}")
+        print(f"📊 Elements breakdown: {elements_found}")
+        
+        # Get bounding boxes for all elements
+        valid_bounding_boxes = []
+        for i, element in enumerate(all_mcq_elements):
             try:
                 box = await asyncio.wait_for(element.bounding_box(), timeout=3.0)
                 if box and box['width'] > 0 and box['height'] > 0:
-                    bounding_boxes.append(box)
-            except:
+                    valid_bounding_boxes.append(box)
+                    print(f"  📐 Element {i+1} box: {box['width']}x{box['height']} at ({box['x']}, {box['y']})")
+                else:
+                    print(f"  ⚠️ Element {i+1} has invalid bounding box")
+            except Exception as e:
+                print(f"  ❌ Error getting bounding box for element {i+1}: {e}")
                 continue
         
-        if not bounding_boxes:
-            print(f"тЭМ Could not get valid bounding boxes for {url}")
+        if not valid_bounding_boxes:
+            print("❌ No valid bounding boxes found")
             return None
         
-        # Calculate combined bounding box
-        min_x = min(box['x'] for box in bounding_boxes)
-        min_y = min(box['y'] for box in bounding_boxes)
-        max_x = max(box['x'] + box['width'] for box in bounding_boxes)
-        max_y = max(box['y'] + box['height'] for box in bounding_boxes)
+        # Calculate comprehensive bounding box that includes ALL elements
+        min_x = min(box['x'] for box in valid_bounding_boxes)
+        min_y = min(box['y'] for box in valid_bounding_boxes)
+        max_x = max(box['x'] + box['width'] for box in valid_bounding_boxes)
+        max_y = max(box['y'] + box['height'] for box in valid_bounding_boxes)
         
-        # Add padding and ensure reasonable bounds
-        padding = 10
+        # Add generous padding for better visual appearance
+        padding = 30  # Increased padding for better look
         min_x = max(0, min_x - padding)
         min_y = max(0, min_y - padding)
         
-        # Get viewport dimensions
-        viewport = await page.evaluate("() => ({ width: window.innerWidth, height: window.innerHeight })")
-        screenshot_width = min(max_x - min_x + padding * 2, viewport['width'] - min_x, 1024)
-        screenshot_height = min(max_y - min_y + padding * 2, viewport['height'] - min_y, 768)
+        # Calculate screenshot dimensions
+        content_width = max_x - min_x + padding * 2
+        content_height = max_y - min_y + padding * 2
         
-        # Ensure minimum size
-        screenshot_width = max(screenshot_width, 100)
-        screenshot_height = max(screenshot_height, 100)
+        # Ensure we don't exceed page dimensions
+        page_dimensions = await page.evaluate("""() => {
+            return {
+                scrollWidth: Math.max(document.body.scrollWidth, document.documentElement.scrollWidth),
+                scrollHeight: Math.max(document.body.scrollHeight, document.documentElement.scrollHeight),
+                clientWidth: document.documentElement.clientWidth,
+                clientHeight: document.documentElement.clientHeight
+            };
+        }""")
         
-        print(f"ЁЯУР Screenshot dimensions: {screenshot_width}x{screenshot_height} at ({min_x}, {min_y})")
+        screenshot_width = min(content_width, page_dimensions['scrollWidth'])
+        screenshot_height = min(content_height, page_dimensions['scrollHeight'])
         
-        # Capture screenshot with timeout
+        # Ensure minimum reasonable size
+        screenshot_width = max(screenshot_width, 400)
+        screenshot_height = max(screenshot_height, 300)
+        
+        print(f"🖼️ Screenshot area: {screenshot_width}x{screenshot_height} at ({min_x}, {min_y})")
+        print(f"📏 Page dimensions: {page_dimensions['scrollWidth']}x{page_dimensions['scrollHeight']}")
+        
+        # Scroll to ensure the content area is visible
+        scroll_target_x = min_x + screenshot_width / 2
+        scroll_target_y = min_y + screenshot_height / 2
+        
+        await page.evaluate(f"""
+            window.scrollTo({{
+                left: {max(0, scroll_target_x - 960)},  // Center horizontally
+                top: {max(0, scroll_target_y - 540)},   // Center vertically
+                behavior: 'instant'
+            }});
+        """)
+        
+        await page.wait_for_timeout(1000)  # Wait for scroll to complete
+        
+        # Take high-quality screenshot
         try:
             screenshot = await asyncio.wait_for(
                 page.screenshot(
                     clip={
-                        "x": min_x,
-                        "y": min_y,
-                        "width": screenshot_width,
-                        "height": screenshot_height
+                        "x": int(min_x),
+                        "y": int(min_y), 
+                        "width": int(screenshot_width),
+                        "height": int(screenshot_height)
                     },
-                    type="png"
+                    type="png",
+                    # High quality settings
+                    quality=100,  # Maximum quality for PNG (though PNG ignores this, it's for consistency)
+                    full_page=False,  # We want specific area
+                    animations="disabled"  # Disable animations for consistent screenshots
                 ),
-                timeout=10.0
+                timeout=15.0
             )
             
-            print(f"тЬЕ Screenshot captured successfully for {url}")
+            print(f"✅ HIGH-QUALITY screenshot captured successfully!")
+            print(f"📊 Screenshot size: {len(screenshot):,} bytes")
             return screenshot
             
         except asyncio.TimeoutError:
-            print(f"тП▒я╕П Screenshot capture timeout for {url}")
+            print(f"⏱️ Screenshot capture timeout")
             return None
         
     except Exception as e:
-        print(f"тЭМ Error capturing screenshot for {url}: {str(e)}")
+        print(f"❌ Error capturing MCQ screenshot: {str(e)}")
+        import traceback
+        traceback.print_exc()
         return None
 
 async def scrape_testbook_page_with_screenshot_ultra_robust(context: BrowserContext, url: str, topic: str) -> Optional[dict]:
@@ -1081,7 +1141,7 @@ async def scrape_testbook_page_with_screenshot_ultra_robust(context: BrowserCont
             return None
         
         # Capture screenshot
-        screenshot = await capture_page_screenshot_ultra_robust(page, url, topic)
+        screenshot = await capture_mcq_screenshot_high_quality(page, url, topic)
         
         if not screenshot:
             print(f"тЭМ Failed to capture screenshot for {url}")
