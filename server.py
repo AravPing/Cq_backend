@@ -32,6 +32,72 @@ import logging
 import pickle
 import hashlib
 
+def get_pdf_directory() -> Path:
+    """
+    Environment-aware PDF directory configuration.
+    
+    Returns appropriate PDF storage directory based on environment:
+    - Production/Cloud environments: /tmp/pdfs (ephemeral but writable)
+    - Development environments: /app/pdfs (persistent in development)
+    
+    Environment detection checks:
+    1. Common cloud platform environment variables
+    2. Directory writability tests
+    3. Filesystem characteristics
+    """
+    # Check for common cloud environment indicators
+    cloud_env_indicators = [
+        'DYNO',              # Heroku
+        'RENDER',            # Render
+        'VERCEL',            # Vercel
+        'RAILWAY_ENVIRONMENT', # Railway
+        'GOOGLE_CLOUD_PROJECT', # Google Cloud
+        'AWS_LAMBDA_FUNCTION_NAME', # AWS Lambda
+        'AZURE_FUNCTIONS_ENVIRONMENT', # Azure Functions
+    ]
+    
+    is_cloud_environment = any(os.getenv(indicator) for indicator in cloud_env_indicators)
+    
+    # Check if we're in a containerized environment
+    is_container = os.path.exists('/.dockerenv') or os.path.exists('/proc/1/cgroup')
+    
+    # Test if /app directory is writable (development environment characteristic)
+    app_dir_writable = False
+    try:
+        test_file = Path("/app/.write_test")
+        test_file.touch()
+        test_file.unlink()
+        app_dir_writable = True
+    except (PermissionError, OSError):
+        app_dir_writable = False
+    
+    # Determine appropriate directory
+    if is_cloud_environment or is_container or not app_dir_writable:
+        # Use /tmp for cloud/production environments
+        pdf_dir = Path("/tmp/pdfs")
+        print(f"🌤️  Using cloud-compatible PDF directory: {pdf_dir}")
+    else:
+        # Use /app/pdfs for local development
+        pdf_dir = Path("/app/pdfs")
+        print(f"🏠 Using development PDF directory: {pdf_dir}")
+    
+    # Ensure directory exists
+    try:
+        pdf_dir.mkdir(parents=True, exist_ok=True)
+        print(f"✅ PDF directory ready: {pdf_dir}")
+    except Exception as e:
+        print(f"❌ Error creating PDF directory {pdf_dir}: {e}")
+        # Fallback to /tmp if /app fails
+        if pdf_dir != Path("/tmp/pdfs"):
+            print("🔄 Falling back to /tmp/pdfs...")
+            pdf_dir = Path("/tmp/pdfs")
+            pdf_dir.mkdir(parents=True, exist_ok=True)
+            print(f"✅ Fallback PDF directory ready: {pdf_dir}")
+        else:
+            raise
+    
+    return pdf_dir
+
 # Load environment variables
 load_dotenv()
 
@@ -1330,10 +1396,9 @@ async def scrape_mcq_content_ultra_robust(url: str, search_topic: str) -> Option
     return None
 
 def generate_pdf(mcqs: List[MCQData], topic: str, job_id: str, relevant_mcqs: int, irrelevant_mcqs: int, total_links: int) -> str:
-    """Generate PDF with enhanced error handling"""
+    """Generate PDF with enhanced error handling and environment-aware storage"""
     try:
-        pdf_dir = Path("/app/pdfs")
-        pdf_dir.mkdir(exist_ok=True)
+        pdf_dir = get_pdf_directory()
         
         filename = f"Testbook_MCQs_{topic.replace(' ', '_')}_{job_id}.pdf"
         filepath = pdf_dir / filename
@@ -1537,7 +1602,7 @@ def generate_pdf(mcqs: List[MCQData], topic: str, job_id: str, relevant_mcqs: in
         raise
 
 def generate_image_based_pdf(screenshots_data: List[dict], topic: str, exam_type: str = "SSC") -> str:
-    """Generate image-based PDF with enhanced error handling"""
+    """Generate image-based PDF with enhanced error handling and environment-aware storage"""
     try:
         from reportlab.lib.pagesizes import letter
         from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Image, PageBreak
@@ -1550,11 +1615,11 @@ def generate_image_based_pdf(screenshots_data: List[dict], topic: str, exam_type
         
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         filename = f"mcq_screenshots_{topic}_{exam_type}_{timestamp}.pdf"
-        filepath = f"/app/pdfs/{filename}"
         
-        os.makedirs(os.path.dirname(filepath), exist_ok=True)
+        pdf_dir = get_pdf_directory()
+        filepath = pdf_dir / filename
         
-        doc = SimpleDocTemplate(filepath, pagesize=letter)
+        doc = SimpleDocTemplate(str(filepath), pagesize=letter)
         story = []
         
         styles = getSampleStyleSheet()
@@ -1928,14 +1993,15 @@ async def get_job_status(job_id: str):
 
 @app.get("/api/download-pdf/{filename}")
 async def download_pdf(filename: str):
-    """Download generated PDF file"""
-    filepath = f"/app/pdfs/{filename}"
+    """Download generated PDF file with environment-aware path resolution"""
+    pdf_dir = get_pdf_directory()
+    filepath = pdf_dir / filename
     
-    if not os.path.exists(filepath):
+    if not filepath.exists():
         raise HTTPException(status_code=404, detail="PDF file not found")
     
     return FileResponse(
-        path=filepath,
+        path=str(filepath),
         filename=filename,
         media_type='application/pdf'
     )
